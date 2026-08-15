@@ -18,7 +18,7 @@ Dark GitHub-style theme (#0d1117 bg, #58a6ff accent, #3fb950 success, #f85149 er
 
 ### 2.1 Navigation
 
-3 main tabs + Calibration (conditional) + Settings (gear icon):
+4 main tabs + Calibration (conditional) + Settings (gear icon):
 
 | Page | ID | Visible by default | Description |
 |------|----|--------------------|-------------|
@@ -26,6 +26,7 @@ Dark GitHub-style theme (#0d1117 bg, #58a6ff accent, #3fb950 success, #f85149 er
 | **Instrument** | `page-instrument` | Yes (default) | Instrument management + virtual pianos |
 | **MIDI** | `page-midi` | Yes | MIDI transports + real-time messages |
 | **Actuators** | `page-actuators` | Yes | Actuator table + CC routing |
+| **Wiring** | `page-wiring` | Yes | Electrical diagram generated from the config |
 | **Calibration** | `page-calibration` | No (conditional) | Acoustic calibration + tests |
 | **Settings** | `page-settings` | Via gear icon | Monitoring, safety, logs, WiFi, config |
 
@@ -70,7 +71,64 @@ Dark GitHub-style theme (#0d1117 bg, #58a6ff accent, #3fb950 success, #f85149 er
 * **CC Routing**: Control Changes table per instrument
   * CC number, target actuator, target parameter (position/amplitude/speed/PWM hold)
 
-### 2.6 Calibration Page (conditional)
+### 2.6 Wiring Page
+
+Everything on this page is **generated from the live configuration** — there is no
+static picture to keep in sync. It reads `GET /api/buses`, `GET /api/actuators`,
+`GET /api/instruments` and `GET /api/power`, then draws the machine as it is
+actually configured.
+
+**Reading the diagram** — two encodings carry the whole story:
+
+| | Meaning |
+|---|---|
+| Channel **colour** | the instrument the actuator belongs to (grey = unassigned) |
+| Channel **shape** | square = servo, disc = solenoid, dashed square = free channel |
+| Faded channel | actuator disabled |
+| Red channel | two actuators on the same output |
+
+* **SVG diagram** (built in JS, no library):
+  * ESP32 block with the exact GPIO of every signal it drives, plus its GND
+  * **Two independent supplies**: a servo rail (5–6 V) and a solenoid rail
+    (12–24 V), each drawn as its own block and feeding only the buses that need it
+  * A single **GND spine** acting as the star point: both supply grounds, the ESP32
+    ground and every bus GND rail tap onto that one line
+  * One band per I²C bus: SDA / SCL / /OE rails, the V+ rail(s) the bus actually
+    needs, the GND rail, and the PCA9685 boards hanging off them. Each board shows
+    its address, a **SERVO / SOLENOID / MIXED** badge, its 16 channels and the
+    **instruments** it carries with their actuator count. Hovering a channel gives
+    actuator id, type, instrument and MIDI note.
+  * Inputs band: MIDI IN (opto-coupler → RX), optional INMP441 I²S mic, status LED
+  * **Download SVG** button — colours are written as SVG attributes, so the exported
+    file renders identically outside the UI (print it for the workbench)
+* **Routing rules** (enforced by construction, not by eye):
+  * every wire owns a private vertical lane, and every horizontal run sits on a `y`
+    of its own — two wires may cross, they never run on top of each other
+  * left-column pins are placed through a `y` picker that nudges any duplicate
+  * aux wires enter their block through its top edge via a private corridor lane,
+    so a wire never crosses a neighbouring block
+* **Summary cards**: actuators, instruments, boards and channels used, worst-case
+  peak current split between the servo rail and the solenoid rail
+* **Boards table**: bus, address, family badge, instruments carried (with counts),
+  channels used, and the supply rail the board must be wired to
+* **Wiring checks** — live validation, each with the fix to apply:
+  * two actuators on the same PCA channel
+  * a board used by an actuator but not declared on its bus
+  * a board carrying both servos and solenoids (one V+ terminal, one PWM frequency)
+  * servos on a bus running above ~130 Hz, solenoids on a 50 Hz bus
+  * servos and solenoids mixed on one bus
+  * actuators on a disabled or unknown bus, more than 4 boards per bus
+  * an instrument whose actuators sit on a bus other than the one it declares
+  * actuators belonging to no instrument
+  * worst-case draw above the configured energy budget
+* **Pinout table**: bus pins read from the device + the compile-time pins
+  (MIDI RX, status LED, I²S mic, GND) with their wiring notes
+* **Power distribution**: per-rail supply sizing computed from the actuator mix,
+  plus the fixed rules (one family per board, star ground, bulk capacitors, fuses,
+  flyback diodes and drivers for solenoids, /OE as hardware kill switch)
+* **Commissioning checklist**: staged power-up before the first note
+
+### 2.7 Calibration Page (conditional)
 
 * Tab hidden by default (`#nav-cal` with `display:none`)
 * **Acoustic calibration**: I²S mic INMP441, progress, latency results
@@ -80,7 +138,7 @@ Dark GitHub-style theme (#0d1117 bg, #58a6ff accent, #3fb950 success, #f85149 er
   * Stress: simultaneous maximum load
 * Test event log (64 entries)
 
-### 2.7 Settings Page
+### 2.8 Settings Page
 
 * **Monitoring**: 4 real-time cards
   * MIDI: received/routed/rejected messages
@@ -139,7 +197,7 @@ Backend unchanged by UI refactoring — all API routes are identical.
 
 # 6. UX / Ergonomics
 
-* **Clean**: 3 main tabs, no nested menus
+* **Clean**: 4 main tabs, no nested menus
 * **Real-time feedback**: virtual piano + actuator indicators + monitoring cards
 * **Guidance**: automatic Welcome page on first boot
 * **Modularity**: add instruments / actuators via UI, no recompilation needed

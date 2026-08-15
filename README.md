@@ -14,6 +14,7 @@
 * **Configurable PWM frequency** per bus — supports 128 servos, 128 solenoids, or any mix
 * **Acoustic calibration** via I²S microphone (measures actual latency of each actuator)
 * **Embedded web interface** with virtual piano(s), real-time monitoring, creation wizard
+* **Auto-generated wiring page**: the electrical diagram (ESP32, PCA9685 boards, power rails) is drawn from your actual configuration, checked for wiring mistakes, and exportable as SVG
 * **Built-in safety**: hardware kill switch, current/frequency/duty cycle limits, watchdog, graceful degradation
 * **Persistent configuration** in JSON on flash (LittleFS) — survives reboots
 
@@ -71,6 +72,26 @@ Each I²C bus supports up to **4 PCA9685 modules** (addresses 0x40 to 0x43), pro
 **Why max 4 PCA per bus?** The PCA9685 communicates via I²C at 400 kHz. Each PWM channel update requires an I²C transaction (~30 bytes). With 4 PCA boards (64 channels) on a single bus, a full update of all channels takes about **5 ms** — which remains compatible with the 1 ms scheduler tick for real-world cases (partial updates). Beyond 4 PCA, cumulative I²C latency would exceed the scheduler's real-time constraints and cause audible triggering delays. The limit of 4 is a trade-off between actuator count and timing precision.
 
 **OE (Output Enable)** — Each bus has an OE pin that instantly disables all PWM outputs on the bus (hardware kill switch). In case of overcurrent or emergency, the Safety Manager can disable an entire bus with a single GPIO operation.
+
+### Wiring page (generated diagram)
+
+The pinout above is the *default* one. Once the device is running, the **Wiring** tab of the web
+interface draws the real thing, live from the configuration, so the diagram can never drift from
+what the firmware drives:
+
+* every configured PCA9685 board with its address, a **SERVO / SOLENOID** badge and the
+  **instruments** it carries — on each channel the *colour* is the instrument and the *shape* is the
+  actuator type (square = servo, disc = solenoid)
+* the **two supplies kept apart**: a 5–6 V servo rail and a 12–24 V solenoid rail, each feeding only
+  the buses that need it, with a single **GND star point** where both supply grounds, the ESP32
+  ground and every board ground meet
+* the SDA / SCL / /OE rails, the MIDI input and the optional I²S microphone
+* wiring checks (two actuators on one channel, board not declared on its bus, a board carrying both
+  families, servos on a bus that is not at ~50 Hz, actuators on the wrong bus for their instrument,
+  worst-case current above the energy budget), per-rail supply sizing, and a **SVG export** you can
+  print for the workbench
+
+See [Web Interface § 2.6](docs/web-interface.md#26-wiring-page).
 
 ## Getting Started
 
