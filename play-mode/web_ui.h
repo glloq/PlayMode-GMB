@@ -293,6 +293,34 @@ tr:hover td{background:var(--bg2)}
 .section-collapse-toggle.open::after{transform:rotate(90deg)}
 .section-collapse-body{display:none;padding:16px 0 0}
 .section-collapse-body.open{display:block}
+
+/* Wiring page — auto-generated electrical diagram */
+.wire-note{font-size:13px;color:var(--fg2);margin-bottom:12px;line-height:1.6}
+.wire-wrap{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);
+  padding:12px;margin-bottom:20px}
+.wire-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.wire-svg{display:block;height:auto;margin:0 auto}
+.wire-empty{color:var(--fg2);font-size:13px;text-align:center;padding:40px 12px}
+.wire-legend{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:12px;color:var(--fg2);
+  margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
+.wire-legend i{display:inline-block;width:12px;height:12px;border-radius:3px;
+  margin-right:6px;vertical-align:-2px;font-style:normal}
+.wire-legend i.line{height:3px;width:16px;border-radius:2px;vertical-align:3px}
+.wire-issue{display:flex;gap:8px;align-items:flex-start;padding:9px 12px;border-radius:6px;
+  font-size:13px;margin-bottom:8px;border:1px solid;line-height:1.5}
+.wire-issue.err{background:#f851491a;border-color:#f8514933;color:var(--red)}
+.wire-issue.warn{background:#d299221a;border-color:#d2992233;color:var(--yellow)}
+.wire-issue.ok{background:#3fb9501a;border-color:#3fb95033;color:var(--green)}
+.wire-issue .ico{flex:0 0 auto}
+.wire-tips{list-style:none;font-size:13px;line-height:1.6;margin-bottom:16px}
+.wire-tips li{padding:7px 0 7px 22px;position:relative;border-bottom:1px solid var(--border);color:var(--fg)}
+.wire-tips li:last-child{border-bottom:none}
+.wire-tips li::before{content:'\25B8';position:absolute;left:4px;color:var(--accent)}
+.wire-tips li b{color:var(--fg)}
+.wire-check{list-style:none;font-size:13px;line-height:1.6}
+.wire-check li{padding:8px 0 8px 26px;position:relative;border-bottom:1px solid var(--border)}
+.wire-check li:last-child{border-bottom:none}
+.wire-check li::before{content:'\2610';position:absolute;left:4px;color:var(--fg2);font-size:15px}
 </style>
 </head>
 <body>
@@ -327,6 +355,7 @@ tr:hover td{background:var(--bg2)}
   <button class="active" onclick="showPage('instrument')">Instrument</button>
   <button onclick="showPage('midi')">MIDI</button>
   <button onclick="showPage('actuators')">Actuators</button>
+  <button onclick="showPage('wiring')">Wiring</button>
   <button onclick="showPage('calibration')" id="nav-cal" style="display:none">Calibration</button>
 </nav>
 
@@ -1039,6 +1068,61 @@ tr:hover td{background:var(--bg2)}
   </div>
 </div>
 
+<!-- ============ WIRING (electrical diagram generated from the configuration) ============ -->
+<div class="page" id="page-wiring">
+
+  <div class="section-title"><span>Electrical wiring</span>
+    <div style="display:flex;gap:8px">
+      <button class="btn sm" onclick="loadWiring()" title="Rebuild from the current configuration">&#8635; Refresh</button>
+      <button class="btn primary sm" onclick="downloadWiringSVG()" title="Download the diagram as an SVG file">&#8681; SVG</button>
+    </div>
+  </div>
+  <p class="wire-note">Generated from the live configuration (I&sup2;C buses + actuators).
+    Every board, channel and signal drawn below is what the firmware will actually drive &mdash;
+    print it or keep it open on the bench while you wire the machine.</p>
+
+  <div class="wire-wrap">
+    <div class="wire-scroll" id="wiring-diagram"><div class="wire-empty">Loading&hellip;</div></div>
+    <div class="wire-legend">
+      <span><i style="background:#58a6ff"></i>Servo channel</span>
+      <span><i style="background:#d29922"></i>Solenoid channel</span>
+      <span><i style="background:#21262d;border:1px solid #30363d"></i>Free channel</span>
+      <span><i style="background:#f85149"></i>Conflict / disabled</span>
+      <span><i class="line" style="background:#58a6ff"></i>SDA</span>
+      <span><i class="line" style="background:#a371f7"></i>SCL</span>
+      <span><i class="line" style="background:#d29922"></i>/OE</span>
+      <span><i class="line" style="background:#f85149"></i>V+ (actuator power)</span>
+      <span><i class="line" style="background:#8b949e"></i>GND (common)</span>
+    </div>
+  </div>
+
+  <div class="cards" id="wiring-cards"></div>
+
+  <div class="section-title">Wiring checks</div>
+  <div id="wiring-issues"></div>
+
+  <div class="section-title">Pinout</div>
+  <div class="table-responsive">
+  <table>
+    <thead><tr><th>Signal</th><th>GPIO</th><th>Direction</th><th>Notes</th></tr></thead>
+    <tbody id="wiring-pins"><tr><td colspan="4" style="color:var(--fg2)">Loading...</td></tr></tbody>
+  </table>
+  </div>
+
+  <div class="section-title">Power distribution</div>
+  <div id="wiring-power"></div>
+
+  <div class="section-title">Commissioning &mdash; power up in stages</div>
+  <ul class="wire-check">
+    <li><b>Logic only.</b> ESP32 powered from USB, actuator supplies OFF. Check the web UI answers and the state chip in the header reads <em>Disarmed</em>.</li>
+    <li><b>I&sup2;C scan.</b> Settings &rarr; Buses &rarr; <em>Scan I&sup2;C</em>: every PCA9685 address above must be detected. A missing address = wrong A0&ndash;A2 jumpers or missing pull-ups.</li>
+    <li><b>/OE check.</b> With the outputs disarmed, the /OE pin must be HIGH (outputs disabled). Keep the 10&nbsp;k&Omega; pull-up to V<sub>logic</sub> so the boards stay off during the ESP32 boot.</li>
+    <li><b>One actuator.</b> Connect a single servo/solenoid, arm the outputs, trigger it from the virtual piano. Confirm the mechanical travel before wiring the rest.</li>
+    <li><b>Full rail.</b> Connect the remaining actuators, current-limit the bench supply to the estimated peak above, then arm.</li>
+    <li><b>Kill switch.</b> Verify the header Kill button (and any external E-stop on /OE) cuts every output instantly.</li>
+  </ul>
+</div>
+
 <!-- ============ ACOUSTIC CALIBRATION (visible only if microphone present) ============ -->
 <div class="page" id="page-calibration">
   <div class="section-title">Acoustic Calibration</div>
@@ -1326,6 +1410,7 @@ function showPage(page) {
   if (page === 'actuators') {
     loadActuatorsWithNotes(); loadInstrumentSelects(); loadCCRouting();
   }
+  if (page === 'wiring') { loadWiring(); }
   if (page === 'calibration') {
     loadCalibrateStatus(); loadCalibrateResults();
   }
@@ -3183,6 +3268,582 @@ function updateAnglePreview() {
     s+='</div>';
   }
   preview.innerHTML=s;
+}
+
+// ============================================================================
+// Wiring — electrical diagram generated from the live configuration
+// ============================================================================
+// The diagram is pure SVG built from /api/buses + /api/actuators. Colours are
+// written as attributes (not CSS classes) so the downloaded .svg renders
+// identically outside the UI.
+const WIRE_NS = 'http://www.w3.org/2000/svg';
+const WIRE_C = {
+  bg:'#0d1117', panel:'#161b22', panel2:'#21262d', line:'#30363d',
+  fg:'#c9d1d9', fg2:'#8b949e',
+  sda:'#58a6ff', scl:'#a371f7', oe:'#d29922', vp:'#f85149', gnd:'#8b949e',
+  servo:'#58a6ff', sol:'#d29922', bad:'#f85149', ok:'#3fb950', aux:'#39c5cf'
+};
+const WIRE_MONO = 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace';
+
+// Compile-time pins (config.h) — not configurable at runtime.
+const WIRE_FIXED_PINS = [
+  {sig:'MIDI RX (Serial2)', gpio:4,  dir:'Input',  color:WIRE_C.ok,
+   note:'DIN / TRS MIDI in, 31250 baud — 6N138 opto-coupler strongly recommended'},
+  {sig:'Status LED',        gpio:2,  dir:'Output', color:WIRE_C.ok,
+   note:'ESP32 built-in LED'},
+  {sig:'I2S WS (mic)',      gpio:15, dir:'Output', color:WIRE_C.aux, opt:true,
+   note:'INMP441 — optional, acoustic calibration only'},
+  {sig:'I2S SCK (mic)',     gpio:14, dir:'Output', color:WIRE_C.aux, opt:true,
+   note:'INMP441 — optional'},
+  {sig:'I2S SD (mic)',      gpio:32, dir:'Input',  color:WIRE_C.aux, opt:true,
+   note:'INMP441 — optional (L/R pin to GND = left channel)'}
+];
+
+// Current estimates mirror config.h (POWER_* / SAFETY_*).
+const WIRE_SERVO_MA = 250, WIRE_SOL_MA = 500, WIRE_IDLE_MA = 30;
+const WIRE_MAX_PCA_PER_BUS = 4;
+
+let wiringModel = null;
+
+async function loadWiring() {
+  const [buses, acts, power] = await Promise.all([
+    api('/api/buses'), api('/api/actuators'), api('/api/power')
+  ]);
+  if (acts) actuators = acts;
+  wiringModel = buildWiringModel(buses || [], acts || actuators || [], power);
+  renderWiringDiagram(wiringModel);
+  renderWiringCards(wiringModel);
+  renderWiringIssues(wiringModel);
+  renderWiringPins(wiringModel);
+  renderWiringPower(wiringModel);
+}
+
+// --- Model -----------------------------------------------------------------
+function buildWiringModel(buses, acts, power) {
+  const m = { buses: [], boards: 0, servo: 0, sol: 0, used: 0, disabled: 0,
+              power: (power && power.budget) ? power.budget : null, issues: [] };
+  const byId = {};
+
+  for (const b of buses) {
+    const bus = { id: b.id, sda: b.sda, scl: b.scl, oe: b.oe,
+                  freqI2c: b.freq_i2c, freqPwm: b.freq_pwm, enabled: !!b.enabled,
+                  declared: (b.pca_addrs || []).slice(),
+                  boards: [], servo: 0, sol: 0, ghost: false };
+    byId[b.id] = bus;
+    m.buses.push(bus);
+  }
+
+  function busOf(id) {
+    if (!byId[id]) {
+      // An actuator points at a bus the device never reported — keep it visible.
+      byId[id] = { id: id, sda: null, scl: null, oe: null, freqI2c: 0, freqPwm: 0,
+                   enabled: false, declared: [], boards: [], servo: 0, sol: 0, ghost: true };
+      m.buses.push(byId[id]);
+    }
+    return byId[id];
+  }
+
+  function boardOf(busId, addr) {
+    const bus = busOf(busId);
+    let bd = null;
+    for (const x of bus.boards) if (x.addr === addr) bd = x;
+    if (!bd) {
+      bd = { bus: busId, addr: addr, declared: bus.declared.indexOf(addr) >= 0,
+             ch: [], servo: 0, sol: 0, used: 0, conflicts: 0, stray: [] };
+      for (let i = 0; i < 16; i++) bd.ch.push([]);
+      bus.boards.push(bd);
+    }
+    return bd;
+  }
+
+  // Declared boards first so an empty (but wired) board still shows up.
+  for (const bus of m.buses) for (const a of bus.declared) boardOf(bus.id, a);
+
+  for (const a of (acts || [])) {
+    const bd = boardOf(a.bus_id, a.pca_addr);
+    const slot = { id: a.id, type: a.type, enabled: a.enabled !== false };
+    const bus = byId[a.bus_id];
+    if (a.type === 0) { m.servo++; bus.servo++; bd.servo++; }
+    else { m.sol++; bus.sol++; bd.sol++; }
+    if (!slot.enabled) m.disabled++;
+    if (a.pca_ch >= 0 && a.pca_ch < 16) {
+      bd.ch[a.pca_ch].push(slot);
+      if (bd.ch[a.pca_ch].length === 1) { bd.used++; m.used++; }
+      else bd.conflicts++;
+    } else {
+      bd.stray.push(slot);   // channel out of the 0-15 range
+    }
+  }
+
+  m.buses.sort((x, y) => x.id - y.id);
+  for (const bus of m.buses) {
+    bus.boards.sort((x, y) => x.addr - y.addr);
+    m.boards += bus.boards.length;
+  }
+  m.issues = findWiringIssues(m);
+  return m;
+}
+
+function hex2(v) { return '0x' + ('0' + v.toString(16).toUpperCase()).slice(-2); }
+
+function findWiringIssues(m) {
+  const out = [];
+  const err  = (t) => out.push({ lvl: 'err',  txt: t });
+  const warn = (t) => out.push({ lvl: 'warn', txt: t });
+
+  for (const bus of m.buses) {
+    const label = 'Bus ' + bus.id;
+    if (bus.ghost) {
+      err(label + ' is referenced by ' + (bus.servo + bus.sol) + ' actuator(s) but the device '
+        + 'reports no such bus. Move them to bus 0 or 1 (Actuators page).');
+      continue;
+    }
+    const acts = bus.servo + bus.sol;
+    if (!bus.enabled && acts > 0)
+      err(label + ' is disabled but drives ' + acts + ' actuator(s) — they will never move. '
+        + 'Enable the bus in Settings → Buses.');
+    if (bus.servo > 0 && bus.freqPwm > 130)
+      err(label + ' runs at ' + bus.freqPwm + ' Hz and drives ' + bus.servo + ' servo(s). '
+        + 'Servos need ~50 Hz — move them to a 50 Hz bus or lower the frequency.');
+    if (bus.servo > 0 && bus.sol > 0)
+      warn(label + ' mixes ' + bus.servo + ' servo(s) and ' + bus.sol + ' solenoid(s). A PCA9685 has '
+        + 'one PWM frequency per board chain: keep servos on one bus and solenoids on the other.');
+    if (bus.sol > 0 && bus.servo === 0 && bus.freqPwm <= 60)
+      warn(label + ' drives solenoids at ' + bus.freqPwm + ' Hz. 200–1000 Hz gives a smoother '
+        + 'hold current and avoids audible buzz.');
+    if (bus.boards.length > WIRE_MAX_PCA_PER_BUS)
+      err(label + ' declares ' + bus.boards.length + ' PCA9685 boards — the firmware supports '
+        + WIRE_MAX_PCA_PER_BUS + ' per bus (' + (WIRE_MAX_PCA_PER_BUS * 16) + ' channels).');
+    if (bus.sda === bus.scl && bus.sda !== null)
+      err(label + ': SDA and SCL are both on GPIO ' + bus.sda + '.');
+
+    for (const bd of bus.boards) {
+      const who = label + ' / PCA ' + hex2(bd.addr);
+      if (!bd.declared)
+        err(who + ' is used by an actuator but is not declared on the bus. Add the board in '
+          + 'Settings → Buses, or the firmware will not initialise it.');
+      if (bd.conflicts > 0) {
+        const dup = [];
+        for (let c = 0; c < 16; c++) if (bd.ch[c].length > 1) {
+          const ids = bd.ch[c].map(s => '#' + s.id).join(', ');
+          dup.push('ch ' + c + ' (' + ids + ')');
+        }
+        err(who + ': several actuators share the same output — ' + dup.join(', ')
+          + '. One channel drives one actuator.');
+      }
+      if (bd.stray.length)
+        err(who + ': ' + bd.stray.length + ' actuator(s) use a channel outside 0–15.');
+      const mixed = bd.servo > 0 && bd.sol > 0;
+      if (mixed)
+        warn(who + ' mixes servos and solenoids on the same board — they share the board PWM '
+          + 'frequency and the same V+ terminal.');
+    }
+  }
+
+  // Cross-bus address collision is legal (two buses), but same-bus duplicates are not:
+  // that case is already covered by boardOf() merging identical addresses.
+  const peak = m.servo * WIRE_SERVO_MA + m.sol * WIRE_SOL_MA;
+  const budget = m.power ? m.power.global_max_ma : 0;
+  if (budget && peak > budget)
+    warn('All-actuators-at-once draw is ~' + (peak / 1000).toFixed(1) + ' A, above the '
+      + (budget / 1000).toFixed(1) + ' A energy budget. The scheduler limits polyphony to '
+      + m.power.max_polyphony + ' simultaneous notes, but size the supply and fuses for the real '
+      + 'worst case you expect.');
+
+  if (m.servo + m.sol === 0)
+    out.push({ lvl: 'warn', txt: 'No actuator configured yet — the diagram only shows the buses. '
+      + 'Add actuators (or run the wizard) to get the full wiring.' });
+  else if (!out.length)
+    out.push({ lvl: 'ok', txt: 'No wiring problem detected in the current configuration.' });
+  return out;
+}
+
+// --- SVG helpers -----------------------------------------------------------
+function wEl(tag, attrs, parent) {
+  const e = document.createElementNS(WIRE_NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function wText(parent, x, y, str, o) {
+  o = o || {};
+  const t = wEl('text', { x: x, y: y, fill: o.fill || WIRE_C.fg,
+    'font-size': o.size || 12, 'font-family': o.font || WIRE_MONO,
+    'font-weight': o.weight || 400, 'text-anchor': o.anchor || 'start' }, parent);
+  t.textContent = str;
+  return t;
+}
+function wTip(parent, str) { const t = wEl('title', {}, parent); t.textContent = str; }
+function wWire(parent, x0, y0, lane, y1, x1, color, dash) {
+  wEl('path', { d: 'M' + x0 + ',' + y0 + ' H' + lane + ' V' + y1 + ' H' + x1,
+    fill: 'none', stroke: color, 'stroke-width': 2, 'stroke-linejoin': 'round',
+    'stroke-dasharray': dash || 'none' }, parent);
+}
+// Same, with one extra elbow: ends on a horizontal edge (port on top of a box)
+// instead of a vertical one, so wires never run through another box.
+function wWireTop(parent, x0, y0, lane, corridor, x1, y1, color, dash) {
+  wEl('path', { d: 'M' + x0 + ',' + y0 + ' H' + lane + ' V' + corridor
+      + ' H' + x1 + ' V' + y1,
+    fill: 'none', stroke: color, 'stroke-width': 2, 'stroke-linejoin': 'round',
+    'stroke-dasharray': dash || 'none' }, parent);
+}
+function wJunction(parent, x, y, color) {
+  wEl('circle', { cx: x, cy: y, r: 3.5, fill: color }, parent);
+}
+
+// --- Diagram ---------------------------------------------------------------
+function renderWiringDiagram(m) {
+  const host = document.getElementById('wiring-diagram');
+  if (!host) return;
+  host.innerHTML = '';
+  if (!m.buses.length) {
+    host.innerHTML = '<div class="wire-empty">No I&sup2;C bus reported by the device.</div>';
+    return;
+  }
+
+  const BW = 176, BH = 120, BGAP = 26;
+  const LEFT_X = 16, LEFT_W = 196, LEFT_R = LEFT_X + LEFT_W;
+  const LANE0 = LEFT_R + 12, LANE_STEP = 7, LANES = 18;
+  const RAIL_X = LANE0 + LANES * LANE_STEP + 16;
+  const BOARD_X0 = RAIL_X + 28;
+  const RAIL_LBL = 190;   // room for the rail labels on the right
+
+  // Aux blocks (MIDI in / microphone / LED) — laid out on their own band.
+  const AUX_BOXES = [
+    { title: 'MIDI IN (DIN/TRS)', sub: '6N138 opto coupler', pins: ['MIDI RX'], w: 200 },
+    { title: 'INMP441 mic (optional)', sub: 'I2S — acoustic calibration',
+      pins: ['I2S WS', 'I2S SCK', 'I2S SD'], w: 210 },
+    { title: 'Status LED', sub: 'on-board', pins: ['Status LED'], w: 160 }
+  ];
+  let auxW = BOARD_X0 + 24;
+  for (const b of AUX_BOXES) auxW += b.w + 30;
+
+  // ---- vertical layout: one band per bus, then one band for the aux inputs
+  const bands = [];
+  let y = 34, maxW = 0;
+  for (const bus of m.buses) {
+    const n = Math.max(bus.boards.length, 1);
+    const boardTop = y + 34, boardBot = boardTop + BH;
+    const band = { bus: bus, top: y, boardTop: boardTop, boardBot: boardBot,
+      rails: { sda: boardBot + 30, scl: boardBot + 48, oe: boardBot + 66,
+               vp: boardBot + 92, gnd: boardBot + 110 } };
+    band.railEnd = BOARD_X0 + n * BW + (n - 1) * BGAP + 22;
+    band.bottom = band.rails.gnd + 24;
+    band.width = band.railEnd + RAIL_LBL;
+    maxW = Math.max(maxW, band.width);
+    bands.push(band);
+    y = band.bottom + 26;
+  }
+  // Aux band: a routing corridor (one lane per wire) above the boxes.
+  const auxTop = y;
+  const auxWires = WIRE_FIXED_PINS.length;
+  const auxBoxTop = auxTop + 34 + auxWires * 6 + 10;
+  const auxBoxH = 114;
+  const auxH = (auxBoxTop - auxTop) + auxBoxH + 16;
+  y = auxTop + auxH + 20;
+  maxW = Math.max(maxW, auxW);
+
+  // ---- ESP32 + PSU column
+  const pins = [];   // {label, color, y, dash}
+  for (const bus of m.buses) {
+    if (bus.ghost) continue;
+    pins.push({ label: 'SDA' + bus.id + '  GPIO ' + bus.sda, color: WIRE_C.sda, key: 'sda', bus: bus });
+    pins.push({ label: 'SCL' + bus.id + '  GPIO ' + bus.scl, color: WIRE_C.scl, key: 'scl', bus: bus });
+    pins.push({ label: '/OE' + bus.id + '  GPIO ' + bus.oe,  color: WIRE_C.oe,  key: 'oe',  bus: bus });
+  }
+  for (const p of WIRE_FIXED_PINS)
+    pins.push({ label: p.sig.replace(' (Serial2)', '') + '  GPIO ' + p.gpio,
+                color: p.color, dash: p.opt ? '4 3' : null, fixed: p });
+
+  const espTop = 34, PIN_STEP = 21;
+  const espH = 44 + pins.length * PIN_STEP;
+  for (let i = 0; i < pins.length; i++) pins[i].y = espTop + 38 + i * PIN_STEP;
+
+  const psuTop = espTop + espH + 34;
+  const psuOut = [];
+  for (const band of bands) psuOut.push({ band: band, key: 'vp', color: WIRE_C.vp,
+    label: 'V+ bus ' + band.bus.id + ' — ' + wireRailVolts(band.bus, true) });
+  for (const band of bands) psuOut.push({ band: band, key: 'gnd', color: WIRE_C.gnd,
+    label: 'GND — bus ' + band.bus.id });
+  const psuH = 44 + psuOut.length * PIN_STEP;
+  for (let i = 0; i < psuOut.length; i++) psuOut[i].y = psuTop + 38 + i * PIN_STEP;
+
+  const H = Math.max(y, psuTop + psuH + 20);
+  const W = Math.ceil(maxW + 16);
+
+  const svg = wEl('svg', { xmlns: WIRE_NS, viewBox: '0 0 ' + W + ' ' + H,
+    width: W, height: H, class: 'wire-svg' }, host);
+  wEl('rect', { x: 0, y: 0, width: W, height: H, fill: WIRE_C.bg }, svg);
+
+  // ---- ESP32 box
+  const esp = wEl('g', {}, svg);
+  wEl('rect', { x: LEFT_X, y: espTop, width: LEFT_W, height: espH, rx: 10,
+    fill: WIRE_C.panel, stroke: WIRE_C.sda, 'stroke-width': 1.5 }, esp);
+  wText(esp, LEFT_X + 14, espTop + 24, 'ESP32-WROOM-32', { weight: 700, size: 13 });
+  for (const p of pins) {
+    wText(esp, LEFT_R - 16, p.y + 4, p.label, { anchor: 'end', size: 11, fill: WIRE_C.fg2 });
+    wEl('rect', { x: LEFT_R - 10, y: p.y - 4, width: 10, height: 8, fill: p.color }, esp);
+  }
+
+  // ---- Power supply box
+  const psu = wEl('g', {}, svg);
+  wEl('rect', { x: LEFT_X, y: psuTop, width: LEFT_W, height: psuH, rx: 10,
+    fill: WIRE_C.panel, stroke: WIRE_C.vp, 'stroke-width': 1.5 }, psu);
+  wText(psu, LEFT_X + 14, psuTop + 24, 'Actuator supply', { weight: 700, size: 13 });
+  for (const p of psuOut) {
+    wText(psu, LEFT_R - 16, p.y + 4, p.label, { anchor: 'end', size: 11, fill: WIRE_C.fg2 });
+    wEl('rect', { x: LEFT_R - 10, y: p.y - 4, width: 10, height: 8, fill: p.color }, psu);
+  }
+
+  // ---- bands
+  let lane = 0;
+  for (const band of bands) {
+    const bus = band.bus;
+    const g = wEl('g', {}, svg);
+    wEl('rect', { x: RAIL_X - 16, y: band.top, width: band.width - RAIL_X + 8,
+      height: band.bottom - band.top, rx: 10, fill: 'none',
+      stroke: WIRE_C.line, 'stroke-dasharray': '5 4' }, g);
+
+    let title = 'Bus ' + bus.id + '  —  ' + bus.boards.length + ' board'
+      + (bus.boards.length === 1 ? '' : 's') + '  —  ' + bus.servo + ' servo / '
+      + bus.sol + ' solenoid';
+    if (!bus.ghost) title += '  —  PWM ' + bus.freqPwm + ' Hz, I2C '
+      + Math.round(bus.freqI2c / 1000) + ' kHz';
+    if (bus.ghost) title += '  —  UNKNOWN BUS';
+    else if (!bus.enabled) title += '  —  DISABLED';
+    wText(g, RAIL_X - 6, band.top + 20, title,
+      { size: 12, weight: 700, fill: (bus.ghost || !bus.enabled) ? WIRE_C.bad : WIRE_C.fg });
+
+    // rails
+    const railDefs = [
+      { key: 'sda', color: WIRE_C.sda, label: 'SDA' + bus.id + (bus.ghost ? '' : ' — GPIO ' + bus.sda) },
+      { key: 'scl', color: WIRE_C.scl, label: 'SCL' + bus.id + (bus.ghost ? '' : ' — GPIO ' + bus.scl) },
+      { key: 'oe',  color: WIRE_C.oe,  label: '/OE' + bus.id + (bus.ghost ? '' : ' — GPIO ' + bus.oe) },
+      { key: 'vp',  color: WIRE_C.vp,  label: 'V+ — ' + wireRailVolts(bus) },
+      { key: 'gnd', color: WIRE_C.gnd, label: 'GND — common' }
+    ];
+    for (const r of railDefs) {
+      const ry = band.rails[r.key];
+      wEl('line', { x1: RAIL_X, y1: ry, x2: band.railEnd, y2: ry,
+        stroke: r.color, 'stroke-width': r.key === 'vp' || r.key === 'gnd' ? 3 : 2 }, g);
+      wText(g, band.railEnd + 10, ry + 4, r.label, { size: 11, fill: r.color });
+    }
+
+    // ESP32 / PSU → rails
+    for (const p of pins) {
+      if (p.bus !== bus) continue;
+      wWire(g, LEFT_R, p.y, LANE0 + (lane++ % LANES) * LANE_STEP, band.rails[p.key], RAIL_X, p.color);
+    }
+    for (const p of psuOut) {
+      if (p.band !== band) continue;
+      wWire(g, LEFT_R, p.y, LANE0 + (lane++ % LANES) * LANE_STEP, band.rails[p.key], RAIL_X, p.color);
+    }
+
+    // boards
+    if (!bus.boards.length) {
+      wEl('rect', { x: BOARD_X0, y: band.boardTop, width: BW, height: BH, rx: 9,
+        fill: 'none', stroke: WIRE_C.line, 'stroke-dasharray': '5 4' }, g);
+      wText(g, BOARD_X0 + BW / 2, band.boardTop + BH / 2 + 4, 'no board',
+        { anchor: 'middle', size: 12, fill: WIRE_C.fg2 });
+    }
+    for (let i = 0; i < bus.boards.length; i++) {
+      drawWiringBoard(g, bus.boards[i], BOARD_X0 + i * (BW + BGAP), band, BW, BH, i);
+    }
+  }
+
+  // ---- aux band: MIDI in, microphone, status LED
+  // Each wire gets its own corridor lane above the boxes and enters through the
+  // top edge, so no wire ever crosses a neighbouring block.
+  const aux = wEl('g', {}, svg);
+  wEl('rect', { x: RAIL_X - 16, y: auxTop, width: maxW - RAIL_X + 8, height: auxH, rx: 10,
+    fill: 'none', stroke: WIRE_C.line, 'stroke-dasharray': '5 4' }, aux);
+  wText(aux, RAIL_X - 6, auxTop + 20, 'Inputs & indicator', { size: 12, weight: 700 });
+
+  let bx = BOARD_X0, corridor = auxTop + 34;
+  for (const box of AUX_BOXES) {
+    wEl('rect', { x: bx, y: auxBoxTop, width: box.w, height: auxBoxH, rx: 9,
+      fill: WIRE_C.panel, stroke: WIRE_C.line }, aux);
+    wText(aux, bx + 12, auxBoxTop + 20, box.title, { size: 11, weight: 700 });
+    wText(aux, bx + 12, auxBoxTop + 38, box.sub, { size: 10, fill: WIRE_C.fg2 });
+    let py = auxBoxTop + 60, px = bx + 26;
+    for (const label of box.pins) {
+      const pin = pins.filter(p => p.fixed && p.fixed.sig.indexOf(label) === 0)[0];
+      if (!pin) continue;
+      wText(aux, bx + 12, py, label + '  GPIO ' + pin.fixed.gpio, { size: 10, fill: pin.color });
+      wEl('rect', { x: px - 5, y: auxBoxTop - 4, width: 10, height: 8, fill: pin.color }, aux);
+      wWireTop(aux, LEFT_R, pin.y, LANE0 + (lane++ % LANES) * LANE_STEP, corridor,
+        px, auxBoxTop, pin.color, pin.dash);
+      corridor += 6; py += 16; px += 26;
+    }
+    bx += box.w + 30;
+  }
+}
+
+function wireRailVolts(bus, short) {
+  if (bus.servo > 0 && bus.sol > 0) return short ? '5-6 & 12-24 V' : 'split 5-6 / 12-24 V';
+  if (bus.sol > 0) return short ? '12-24 V' : '12-24 V (solenoid)';
+  return short ? '5-6 V' : '5-6 V (servo)';
+}
+
+function drawWiringBoard(g, bd, x, band, BW, BH, idx) {
+  const top = band.boardTop;
+  wEl('rect', { x: x, y: top, width: BW, height: BH, rx: 9, fill: WIRE_C.panel,
+    stroke: bd.declared ? WIRE_C.line : WIRE_C.bad, 'stroke-width': bd.declared ? 1 : 1.5,
+    'stroke-dasharray': bd.declared ? 'none' : '5 4' }, g);
+  wText(g, x + 12, top + 20, 'PCA9685 #' + (idx + 1), { size: 11, weight: 700 });
+  wText(g, x + BW - 12, top + 20, hex2(bd.addr),
+    { size: 12, weight: 700, anchor: 'end', fill: bd.declared ? WIRE_C.sda : WIRE_C.bad });
+
+  // 16 channels, 8 x 2
+  const CELL = 16, GAP = 3;
+  const gw = 8 * CELL + 7 * GAP;
+  const gx = x + (BW - gw) / 2, gy = top + 32;
+  for (let c = 0; c < 16; c++) {
+    const cx = gx + (c % 8) * (CELL + GAP), cy = gy + Math.floor(c / 8) * (CELL + GAP);
+    const slots = bd.ch[c];
+    let fill = WIRE_C.panel2, stroke = WIRE_C.line, op = 1, tip = 'Channel ' + c + ' — free';
+    if (slots.length > 1) {
+      fill = WIRE_C.bad; stroke = WIRE_C.bad;
+      tip = 'Channel ' + c + ' — CONFLICT: ' + slots.map(s => '#' + s.id).join(', ');
+    } else if (slots.length === 1) {
+      const s = slots[0];
+      fill = s.type === 0 ? WIRE_C.servo : WIRE_C.sol;
+      stroke = fill;
+      tip = 'Channel ' + c + ' — ' + (s.type === 0 ? 'servo' : 'solenoid') + ' #' + s.id;
+      if (!s.enabled) { op = 0.35; tip += ' (disabled)'; }
+    }
+    const r = wEl('rect', { x: cx, y: cy, width: CELL, height: CELL, rx: 3,
+      fill: fill, 'fill-opacity': op, stroke: stroke }, g);
+    wTip(r, tip);
+  }
+  wText(g, x + 12, top + BH - 12,
+    bd.used + '/16 used — ' + bd.servo + ' servo / ' + bd.sol + ' sol',
+    { size: 9, fill: WIRE_C.fg2 });
+
+  // board terminals down to the rails
+  const drops = [
+    { key: 'sda', color: WIRE_C.sda, dx: 22 },
+    { key: 'scl', color: WIRE_C.scl, dx: 44 },
+    { key: 'oe',  color: WIRE_C.oe,  dx: 66 },
+    { key: 'vp',  color: WIRE_C.vp,  dx: BW - 46 },
+    { key: 'gnd', color: WIRE_C.gnd, dx: BW - 24 }
+  ];
+  for (const d of drops) {
+    const dx = x + d.dx, ry = band.rails[d.key];
+    wEl('line', { x1: dx, y1: top + BH, x2: dx, y2: ry, stroke: d.color, 'stroke-width': 2 }, g);
+    wJunction(g, dx, ry, d.color);
+  }
+}
+
+// --- Panels ----------------------------------------------------------------
+function renderWiringCards(m) {
+  const host = document.getElementById('wiring-cards');
+  if (!host) return;
+  const peak = m.servo * WIRE_SERVO_MA + m.sol * WIRE_SOL_MA;
+  const idle = (m.servo + m.sol) * WIRE_IDLE_MA;
+  const budget = m.power ? m.power.global_max_ma : 0;
+  const pct = budget ? Math.min(100, Math.round(peak / budget * 100)) : 0;
+  const capacity = m.boards * 16;
+  let html = '';
+  html += '<div class="card"><h3>Actuators</h3><div class="val">' + (m.servo + m.sol) + '</div>'
+       + '<div class="sub">' + m.servo + ' servo &middot; ' + m.sol + ' solenoid'
+       + (m.disabled ? ' &middot; ' + m.disabled + ' disabled' : '') + '</div></div>';
+  html += '<div class="card"><h3>PCA9685 boards</h3><div class="val">' + m.boards + '</div>'
+       + '<div class="sub">' + m.used + ' / ' + capacity + ' channels wired</div></div>';
+  html += '<div class="card"><h3>Peak current</h3><div class="val">'
+       + (peak / 1000).toFixed(1) + '<span class="unit">A</span></div>'
+       + '<div class="bar"><div class="bar-fill" style="width:' + pct + '%;background:'
+       + (pct > 80 ? 'var(--red)' : 'var(--green)') + '"></div></div>'
+       + '<div class="sub">All actuators at once' + (budget ? ' &middot; budget '
+       + (budget / 1000).toFixed(1) + ' A' : '') + '</div></div>';
+  html += '<div class="card"><h3>Idle draw</h3><div class="val">' + idle
+       + '<span class="unit">mA</span></div>'
+       + '<div class="sub">Servos holding position, solenoids off</div></div>';
+  host.innerHTML = html;
+}
+
+function renderWiringIssues(m) {
+  const host = document.getElementById('wiring-issues');
+  if (!host) return;
+  const icon = { err: '❌', warn: '⚠️', ok: '✅' };
+  let html = '';
+  for (const i of m.issues)
+    html += '<div class="wire-issue ' + i.lvl + '"><span class="ico">' + icon[i.lvl]
+         + '</span><span>' + esc(i.txt) + '</span></div>';
+  host.innerHTML = html;
+}
+
+function renderWiringPins(m) {
+  const tbody = document.getElementById('wiring-pins');
+  if (!tbody) return;
+  let html = '';
+  for (const bus of m.buses) {
+    if (bus.ghost) continue;
+    const rows = [
+      ['SDA' + bus.id, bus.sda, 'I/O', 'Bus ' + bus.id + ' data — 2.2–4.7 kΩ pull-up to 3.3 V'],
+      ['SCL' + bus.id, bus.scl, 'Output', 'Bus ' + bus.id + ' clock — ' + Math.round(bus.freqI2c / 1000) + ' kHz'],
+      ['/OE' + bus.id, bus.oe, 'Output', 'Output Enable, LOW = outputs live. 10 kΩ pull-up so the boards stay off at boot']
+    ];
+    for (const r of rows)
+      html += '<tr><td><strong>' + r[0] + '</strong></td><td>GPIO ' + r[1] + '</td><td>' + r[2]
+           + '</td><td style="color:var(--fg2)">' + esc(r[3]) + '</td></tr>';
+  }
+  for (const p of WIRE_FIXED_PINS)
+    html += '<tr><td><strong>' + esc(p.sig) + '</strong></td><td>GPIO ' + p.gpio + '</td><td>'
+         + p.dir + '</td><td style="color:var(--fg2)">' + esc(p.note) + '</td></tr>';
+  tbody.innerHTML = html;
+}
+
+function renderWiringPower(m) {
+  const host = document.getElementById('wiring-power');
+  if (!host) return;
+  const peak = m.servo * WIRE_SERVO_MA + m.sol * WIRE_SOL_MA;
+  const servoA = (m.servo * WIRE_SERVO_MA / 1000).toFixed(1);
+  const solA = (m.sol * WIRE_SOL_MA / 1000).toFixed(1);
+  const supply = Math.max(1, Math.ceil(peak / 1000 * 1.3));
+  const tips = [
+    '<b>One supply per actuator type.</b> Servos on 5–6 V (' + m.servo + ' × '
+      + WIRE_SERVO_MA + ' mA ≈ ' + servoA + ' A), solenoids on their own 12–24 V rail ('
+      + m.sol + ' × ' + WIRE_SOL_MA + ' mA ≈ ' + solA + ' A). Never power actuators from '
+      + 'the ESP32 5 V pin.',
+    '<b>Size the supply at ~' + supply + ' A</b> (peak + 30 % headroom) if you expect every '
+      + 'actuator to fire together; a smaller supply is fine when the polyphony limit keeps the '
+      + 'real draw below that.',
+    '<b>Common ground.</b> ESP32 GND, every PCA9685 GND and both actuator supply grounds must be '
+      + 'tied together at one star point, otherwise the PWM signal has no reference.',
+    '<b>Bulk capacitance.</b> 470–1000 µF low-ESR across V+ / GND at each PCA9685, plus '
+      + 'a 100 nF ceramic close to the board — servo inrush is what causes random ESP32 resets.',
+    '<b>Fuse each rail</b> at roughly 1.5 × its expected draw, and keep the V+ / GND wiring '
+      + 'thick (the PCA9685 screw terminal carries the full board current, not the traces).',
+    '<b>Solenoid flyback.</b> Each solenoid needs its own flyback diode (or the driver board’s) '
+      + 'across the coil — a PCA9685 output cannot sink the collapse current directly, use a '
+      + 'MOSFET / Darlington driver board.',
+    '<b>/OE is the kill switch.</b> Wire it through the emergency stop so opening the E-stop pulls '
+      + '/OE HIGH and cuts every output in hardware, independently of the firmware.',
+    '<b>Logic level.</b> The PCA9685 accepts 3.3 V logic directly; power its VCC (logic) from '
+      + '3.3 V and keep the actuator V+ terminal fully separate.'
+  ];
+  let html = '<ul class="wire-tips">';
+  for (const t of tips) html += '<li>' + t + '</li>';
+  html += '</ul>';
+  host.innerHTML = html;
+}
+
+// Serialise the generated diagram to a standalone .svg file.
+function downloadWiringSVG() {
+  const svg = document.querySelector('#wiring-diagram svg');
+  if (!svg) { toast('Nothing to export yet', 'error'); return; }
+  const clone = svg.cloneNode(true);
+  clone.setAttribute('xmlns', WIRE_NS);
+  clone.removeAttribute('class');
+  const src = '<?xml version="1.0" encoding="UTF-8"?>\n'
+            + new XMLSerializer().serializeToString(clone);
+  const blob = new Blob([src], { type: 'image/svg+xml' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'playmode-wiring.svg';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 // ============================================================================

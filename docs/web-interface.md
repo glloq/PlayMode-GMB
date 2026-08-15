@@ -18,7 +18,7 @@ Dark GitHub-style theme (#0d1117 bg, #58a6ff accent, #3fb950 success, #f85149 er
 
 ### 2.1 Navigation
 
-3 main tabs + Calibration (conditional) + Settings (gear icon):
+4 main tabs + Calibration (conditional) + Settings (gear icon):
 
 | Page | ID | Visible by default | Description |
 |------|----|--------------------|-------------|
@@ -26,6 +26,7 @@ Dark GitHub-style theme (#0d1117 bg, #58a6ff accent, #3fb950 success, #f85149 er
 | **Instrument** | `page-instrument` | Yes (default) | Instrument management + virtual pianos |
 | **MIDI** | `page-midi` | Yes | MIDI transports + real-time messages |
 | **Actuators** | `page-actuators` | Yes | Actuator table + CC routing |
+| **Wiring** | `page-wiring` | Yes | Electrical diagram generated from the config |
 | **Calibration** | `page-calibration` | No (conditional) | Acoustic calibration + tests |
 | **Settings** | `page-settings` | Via gear icon | Monitoring, safety, logs, WiFi, config |
 
@@ -70,7 +71,39 @@ Dark GitHub-style theme (#0d1117 bg, #58a6ff accent, #3fb950 success, #f85149 er
 * **CC Routing**: Control Changes table per instrument
   * CC number, target actuator, target parameter (position/amplitude/speed/PWM hold)
 
-### 2.6 Calibration Page (conditional)
+### 2.6 Wiring Page
+
+Everything on this page is **generated from the live configuration** — there is no
+static picture to keep in sync. It reads `GET /api/buses`, `GET /api/actuators` and
+`GET /api/power`, then draws the machine as it is actually configured.
+
+* **SVG diagram** (built in JS, no library):
+  * ESP32 block with the exact GPIO of every signal it drives
+  * Actuator supply block (one V+ rail per bus + common GND)
+  * One band per I²C bus: SDA / SCL / /OE / V+ / GND rails and the PCA9685 boards
+    hanging off them, each board showing its address and its 16 channels
+    (blue = servo, amber = solenoid, grey = free, red = conflict, faded = disabled).
+    Hovering a channel shows the actuator it drives.
+  * Inputs band: MIDI IN (opto-coupler → RX), optional INMP441 I²S mic, status LED
+  * **Download SVG** button — colours are written as SVG attributes, so the exported
+    file renders identically outside the UI (print it for the workbench)
+* **Summary cards**: actuator count, boards and channels used, worst-case peak
+  current vs. the energy budget, idle draw
+* **Wiring checks** — live validation, each with the fix to apply:
+  * two actuators on the same PCA channel
+  * a board used by an actuator but not declared on its bus
+  * servos on a bus running above ~130 Hz, solenoids on a 50 Hz bus
+  * servos and solenoids mixed on one bus (a PCA9685 has a single PWM frequency)
+  * actuators on a disabled or unknown bus, more than 4 boards per bus
+  * worst-case draw above the configured energy budget
+* **Pinout table**: bus pins read from the device + the compile-time pins
+  (MIDI RX, status LED, I²S mic) with their wiring notes
+* **Power distribution**: supply sizing computed from the actuator mix, plus the
+  fixed rules (separate rails, star ground, bulk capacitors, fuses, flyback diodes,
+  /OE as hardware kill switch)
+* **Commissioning checklist**: staged power-up before the first note
+
+### 2.7 Calibration Page (conditional)
 
 * Tab hidden by default (`#nav-cal` with `display:none`)
 * **Acoustic calibration**: I²S mic INMP441, progress, latency results
@@ -80,7 +113,7 @@ Dark GitHub-style theme (#0d1117 bg, #58a6ff accent, #3fb950 success, #f85149 er
   * Stress: simultaneous maximum load
 * Test event log (64 entries)
 
-### 2.7 Settings Page
+### 2.8 Settings Page
 
 * **Monitoring**: 4 real-time cards
   * MIDI: received/routed/rejected messages
@@ -139,7 +172,7 @@ Backend unchanged by UI refactoring — all API routes are identical.
 
 # 6. UX / Ergonomics
 
-* **Clean**: 3 main tabs, no nested menus
+* **Clean**: 4 main tabs, no nested menus
 * **Real-time feedback**: virtual piano + actuator indicators + monitoring cards
 * **Guidance**: automatic Welcome page on first boot
 * **Modularity**: add instruments / actuators via UI, no recompilation needed
