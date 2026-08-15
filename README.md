@@ -76,15 +76,22 @@ Each I²C bus supports up to **4 PCA9685 modules** (addresses 0x40 to 0x43), pro
 ### Wiring page (generated diagram)
 
 The pinout above is the *default* one. Once the device is running, the **Wiring** tab of the web
-interface draws the real thing: every configured PCA9685 board with its address and its 16
-channels, the SDA / SCL / /OE / V+ / GND rails, the MIDI input and the optional I²S microphone —
-all read live from the configuration, so the diagram can never drift from what the firmware drives.
+interface draws the real thing, live from the configuration, so the diagram can never drift from
+what the firmware drives:
 
-The same page also runs the wiring checks (two actuators on one channel, board not declared on its
-bus, servos on a bus that is not at ~50 Hz, mixed servo/solenoid buses, worst-case current above the
-energy budget), computes the supply sizing from your actuator mix, and exports the diagram as a
-standalone **SVG** you can print for the workbench. See
-[Web Interface § 2.6](docs/web-interface.md#26-wiring-page).
+* every configured PCA9685 board with its address, a **SERVO / SOLENOID** badge and the
+  **instruments** it carries — on each channel the *colour* is the instrument and the *shape* is the
+  actuator type (square = servo, disc = solenoid)
+* the **two supplies kept apart**: a 5–6 V servo rail and a 12–24 V solenoid rail, each feeding only
+  the buses that need it, with a single **GND star point** where both supply grounds, the ESP32
+  ground and every board ground meet
+* the SDA / SCL / /OE rails, the MIDI input and the optional I²S microphone
+* wiring checks (two actuators on one channel, board not declared on its bus, a board carrying both
+  families, servos on a bus that is not at ~50 Hz, actuators on the wrong bus for their instrument,
+  worst-case current above the energy budget), per-rail supply sizing, and a **SVG export** you can
+  print for the workbench
+
+See [Web Interface § 2.6](docs/web-interface.md#26-wiring-page).
 
 ## Getting Started
 
