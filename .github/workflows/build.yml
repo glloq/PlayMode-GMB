@@ -5,6 +5,9 @@ on:
   push:
     branches: [ main ]
   pull_request:
+  # Lets a branch be built and tested on demand, before it reaches a pull
+  # request — otherwise a feature branch has no way to exercise this workflow.
+  workflow_dispatch:
 
 jobs:
   # Native (host) tests for the General-Midi-Boop v2 capability layer. No ESP32
