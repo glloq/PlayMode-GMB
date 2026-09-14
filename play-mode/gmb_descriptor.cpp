@@ -250,6 +250,14 @@ void writeInstrument(Writer& w, const GmbInstrumentCaps& e, uint8_t level) {
     if (level < GMB_DETAIL_CORE) {
         w.raw(","); w.key("physical"); w.raw("{");
         w.key("family"); w.str(GMB_PHYSICAL_FAMILY);
+        // `physical` is a free extension namespace (spec §5.9), so this is where
+        // PlayMode says whether NoteOff means anything musically. Not every note
+        // is percussion: a key or a hit-and-hold coil sustains until released,
+        // while a strike is over the moment it lands.
+        w.raw(","); w.key("note_off");
+        if (e.has_hold_notes && e.has_attack_notes) w.str("mixed");
+        else if (e.has_hold_notes)                  w.str("releases");
+        else                                        w.str("ignored");
         w.raw("}");
     }
 

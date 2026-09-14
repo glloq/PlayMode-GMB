@@ -265,6 +265,15 @@ With no profile chosen, the descriptor declares the generic supported type
 `chromatic_percussion` and omits `subtype` and `gm_program` entirely. Nothing is
 ever inferred from actuator topology: a solenoid does not imply a xylophone.
 
+### Note-off semantics
+
+`physical` is a free extension namespace, so PlayMode uses it to say whether
+NoteOff means anything musically: `ignored` (strikes only — the note is over the
+moment it lands), `releases` (keys or hit-and-hold coils that sustain), or
+`mixed` (a mechanical piano with struck keys and a held pedal). Not every note
+is percussion, and a controller that knows this can decide whether note length
+matters at all.
+
 ### Configured state
 
 `"configured": false` keeps the slot visible so GMB recognises the instrument

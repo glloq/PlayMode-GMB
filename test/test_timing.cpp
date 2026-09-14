@@ -159,3 +159,24 @@ TEST(timing_block_is_omitted_entirely_when_nothing_is_known) {
     CHECK(!json.empty());
     CHECK_NOT_CONTAINS(json, "\"timing\"");
 }
+
+TEST(note_off_semantics_are_declared) {
+    // Strike-only: NoteOff is musically irrelevant.
+    CHECK_CONTAINS(makeXylophone().descriptor(), "\"note_off\":\"ignored\"");
+
+    // Key-only: NoteOff releases the note.
+    GmbFixture keys;
+    uint8_t k = keys.addInstrument("Keys", 0, true, 0);
+    keys.addServo(1, SERVO_TOUCHE, 25, 80);
+    keys.map(k, 60, 1);
+    CHECK_CONTAINS(keys.descriptor(), "\"note_off\":\"releases\"");
+
+    // A mechanical piano with struck keys and a held pedal is both.
+    GmbFixture mixed;
+    uint8_t m = mixed.addInstrument("Piano", 0, true, 0);
+    mixed.addSolenoid(1);
+    mixed.addServo(2, SERVO_TOUCHE, 25, 80);
+    mixed.map(m, 60, 1);
+    mixed.map(m, 61, 2);
+    CHECK_CONTAINS(mixed.descriptor(), "\"note_off\":\"mixed\"");
+}
