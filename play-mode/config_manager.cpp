@@ -1,4 +1,5 @@
 #include "config_manager.h"
+#include "gmb_protocol.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
@@ -32,6 +33,9 @@ ConfigManager::ConfigManager()
     memset(_actuators, 0, sizeof(_actuators));
     memset(_instruments, 0, sizeof(_instruments));
     memset(_routing_configs, 0, sizeof(_routing_configs));
+    for (uint8_t i = 0; i < MAX_INSTRUMENTS; i++) {
+        _instruments[i].gm_program = (uint8_t)GMB_GM_PROGRAM_NONE;
+    }
 }
 
 bool ConfigManager::begin() {
@@ -565,6 +569,13 @@ void ConfigManager::loadDefaults() {
     _routing_count = 0;
     _version = CONFIG_VERSION;
 
+    // A zeroed instrument slot would read as GM program 0 ("acoustic grand"),
+    // i.e. a musical profile nobody chose. Unset must stay unset so the GMB
+    // descriptor omits gm_program instead of announcing a piano.
+    for (uint8_t i = 0; i < MAX_INSTRUMENTS; i++) {
+        _instruments[i].gm_program = (uint8_t)GMB_GM_PROGRAM_NONE;
+    }
+
     // WiFi defaults — AP enabled by default for first access without configuration
     strlcpy(_wifi_config.ssid, "", sizeof(_wifi_config.ssid));
     strlcpy(_wifi_config.password, "", sizeof(_wifi_config.password));
@@ -602,6 +613,7 @@ void ConfigManager::loadDefaults() {
     _midi_input_config.rtp_port = MIDI_RTP_PORT;
     _midi_input_config.jitter_buffer_ms = MIDI_JITTER_BUFFER_MS;
     _midi_input_config.serial_rx_pin = MIDI_SERIAL_RX_PIN;
+    _midi_input_config.serial_tx_pin = MIDI_SERIAL_TX_PIN;
 
     Serial.println("[CONFIG] Defaults loaded");
 }
@@ -943,6 +955,7 @@ void ConfigManager::deserializeBus(BusConfig& bus, const JsonObject& obj) {
 
 void ConfigManager::serializeInstrument(const InstrumentConfig& inst, JsonObject& obj) {
     obj["name"] = inst.name;
+    obj["gm_program"] = inst.gm_program;
     obj["midi_channel"] = inst.midi_channel;
     obj["bus_id"] = inst.bus_id;
     obj["default_latency_ms"] = inst.default_latency_ms;
@@ -962,6 +975,9 @@ void ConfigManager::serializeInstrument(const InstrumentConfig& inst, JsonObject
 
 void ConfigManager::deserializeInstrument(InstrumentConfig& inst, const JsonObject& obj) {
     strlcpy(inst.name, obj["name"] | "Instrument", sizeof(inst.name));
+    // Absent (pre-v9 file) or out of range -> no musical profile configured.
+    long gm = obj["gm_program"] | (long)GMB_GM_PROGRAM_NONE;
+    inst.gm_program = (gm >= 0 && gm <= 127) ? (uint8_t)gm : (uint8_t)GMB_GM_PROGRAM_NONE;
     inst.midi_channel = obj["midi_channel"] | 0;
     inst.bus_id = obj["bus_id"] | 0;
     inst.default_latency_ms = obj["default_latency_ms"] | 10;
@@ -1023,6 +1039,7 @@ void ConfigManager::serializeMidiInput(const MidiInputConfig& midi, JsonObject& 
     obj["rtp_port"] = midi.rtp_port;
     obj["jitter_buffer_ms"] = midi.jitter_buffer_ms;
     obj["serial_rx_pin"] = midi.serial_rx_pin;
+    obj["serial_tx_pin"] = midi.serial_tx_pin;
 }
 
 void ConfigManager::deserializeMidiInput(MidiInputConfig& midi, const JsonObject& obj) {
@@ -1033,6 +1050,7 @@ void ConfigManager::deserializeMidiInput(MidiInputConfig& midi, const JsonObject
     midi.rtp_port = obj["rtp_port"] | MIDI_RTP_PORT;
     midi.jitter_buffer_ms = obj["jitter_buffer_ms"] | MIDI_JITTER_BUFFER_MS;
     midi.serial_rx_pin = obj["serial_rx_pin"] | MIDI_SERIAL_RX_PIN;
+    midi.serial_tx_pin = obj["serial_tx_pin"] | MIDI_SERIAL_TX_PIN;
 
     // AUDIT FIX (P0.4): heal configs saved before raw UDP and RTP-MIDI were
     // split onto distinct ports. AppleMIDI reserves rtp_port AND rtp_port+1, so

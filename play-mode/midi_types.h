@@ -59,6 +59,11 @@ struct MidiInputConfig {
     uint16_t rtp_port;          // RTP-MIDI port
     uint16_t jitter_buffer_ms;  // Jitter buffer depth (ms)
     uint8_t serial_rx_pin;      // GPIO for Serial MIDI RX
+    // GPIO for Serial MIDI TX (DIN MIDI OUT), or MIDI_SERIAL_TX_DISABLED.
+    // Automatic recognition needs a return path: a DIN IN-only wiring cannot
+    // answer a SysEx handshake, so the serial transport only advertises
+    // discovery when a TX pin is configured (see docs/SYSEX_IDENTITY.md §8).
+    uint8_t serial_tx_pin;
 };
 
 #endif // MIDI_TYPES_H

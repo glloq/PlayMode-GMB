@@ -598,7 +598,14 @@ tr:hover td{background:var(--bg2)}
       <h3>MIDI Cable (DIN / TRS)</h3>
       <label><input type="checkbox" id="midi-serial" onchange="updateMidiConfig()"> Active</label>
       <div class="sub">Classic wired connection via 5-pin MIDI jack or TRS jack.</div>
-      <div class="sub" style="margin-top:4px;font-size:11px;color:var(--fg2)">GPIO <span id="midi-rx-pin">4</span> &mdash; 31250 baud</div>
+      <div class="sub" style="margin-top:4px;font-size:11px;color:var(--fg2)">IN on GPIO <span id="midi-rx-pin">4</span> &mdash; 31250 baud</div>
+      <div class="form-group" style="margin-top:8px">
+        <label style="font-size:11px">MIDI OUT pin (GPIO)</label>
+        <input type="number" id="midi-tx-pin" min="-1" max="39" value="-1" onchange="updateMidiConfig()">
+        <div class="help">-1 = no MIDI OUT. A DIN port with IN only cannot answer a General-Midi-Boop
+          handshake, so the instrument has to be selected by hand on the controller. Wire a MIDI OUT
+          and set its GPIO here to be recognised automatically over the cable.</div>
+      </div>
     </div>
     <div class="card">
       <h3>WiFi &mdash; direct send (UDP)</h3>
@@ -636,6 +643,51 @@ tr:hover td{background:var(--bg2)}
   </table>
   </div>
   <div id="midi-log-count" style="color:var(--fg2);font-size:11px;margin-top:4px;text-align:right"></div>
+
+  <!-- Automatic recognition (General-Midi-Boop v2) -->
+  <div class="section-title" style="margin-top:24px"><span>Automatic recognition</span>
+    <button class="btn sm" onclick="loadGmbStatus()">Refresh</button>
+  </div>
+  <p style="color:var(--fg2);font-size:12px;margin-bottom:12px">
+    PlayMode answers General-Midi-Boop's discovery handshake and publishes what it can play &mdash;
+    channels, notes, velocity, polyphony, timing &mdash; straight from this configuration.
+    There is nothing to enter twice: change your mapping here and the controller follows.
+  </p>
+  <div class="cards" style="margin-bottom:12px">
+    <div class="card">
+      <h3>Identity</h3>
+      <div class="sub">Protocol <span id="gmb-proto">&mdash;</span></div>
+      <div class="sub">Instance <span id="gmb-instance" style="font-family:monospace">&mdash;</span></div>
+      <div class="sub">Descriptor revision <strong id="gmb-rev">&mdash;</strong></div>
+    </div>
+    <div class="card">
+      <h3>Descriptor</h3>
+      <div class="val"><span id="gmb-size">0</span><span class="unit">bytes</span></div>
+      <div class="sub"><span id="gmb-chunks">0</span> segment(s) &mdash; <span id="gmb-detail">full</span></div>
+      <div class="sub"><a href="/gmb/descriptor.json" target="_blank">View descriptor</a></div>
+    </div>
+    <div class="card">
+      <h3>What is announced</h3>
+      <div class="sub"><strong id="gmb-insts">0</strong> logical instrument(s)</div>
+      <div class="sub"><strong id="gmb-notes">0</strong> playable note(s)</div>
+      <div class="sub" id="gmb-rejected" style="color:var(--fg2)"></div>
+    </div>
+    <div class="card">
+      <h3>Reachability</h3>
+      <div class="sub">HTTP descriptor: <span id="gmb-http">&mdash;</span></div>
+      <div class="sub">Push notifications: <span id="gmb-push">&mdash;</span></div>
+      <div class="sub" style="font-size:11px;color:var(--fg2)">Discovery needs a return path:
+        USB/BLE/RTP or a wired MIDI OUT.</div>
+    </div>
+  </div>
+  <div class="table-responsive">
+  <table>
+    <thead><tr><th>Channel</th><th>Name</th><th>Type</th><th>Notes</th><th>Velocity</th>
+      <th>Polyphony</th><th>State</th></tr></thead>
+    <tbody id="gmb-inst-table"><tr><td colspan="7" style="color:var(--fg2)">Not loaded.</td></tr></tbody>
+  </table>
+  </div>
+  <div id="gmb-traffic" style="color:var(--fg2);font-size:11px;margin-top:6px"></div>
 </div>
 
 <!-- (Config is now in the unified Settings page) -->
@@ -660,6 +712,30 @@ tr:hover td{background:var(--bg2)}
       <label>Instrument name</label>
       <input type="text" id="mi-name" maxlength="31" placeholder="E.g.: Xylophone, Snare drum...">
       <div class="help">Free-form name to identify this instrument in the interface</div>
+    </div>
+    <div class="form-group">
+      <label>Instrument type</label>
+      <select id="mi-gm">
+        <option value="-1">Not set</option>
+        <option value="0">Piano</option>
+        <option value="6">Harpsichord</option>
+        <option value="8">Celesta</option>
+        <option value="9">Glockenspiel</option>
+        <option value="11">Vibraphone</option>
+        <option value="12">Marimba</option>
+        <option value="13">Xylophone</option>
+        <option value="14">Tubular bells / carillon</option>
+        <option value="15">Dulcimer</option>
+        <option value="46">Harp / lyre</option>
+        <option value="108">Kalimba</option>
+        <option value="114">Steel drum / tongue drum</option>
+        <option value="115">Woodblock</option>
+        <option value="112">Tinkle bell</option>
+      </select>
+      <div class="help">What this instrument IS, musically. It is the only thing General-Midi-Boop
+        needs to name the instrument: everything else (notes, velocity, polyphony, timing) is derived
+        from your actuators and mappings. Leave "Not set" and PlayMode announces a generic pitched
+        type rather than guessing one.</div>
     </div>
     <div class="form-row">
       <div class="form-group">
@@ -1404,7 +1480,7 @@ function showPage(page) {
   if (page === 'instrument') {
     loadHomeInstruments(); loadInstrumentSelects(); buildAllPianos();
   }
-  if (page === 'midi') { loadMidiConfig(); }
+  if (page === 'midi') { loadMidiConfig(); loadGmbStatus(); }
   if (page === 'actuators') {
     loadActuatorsWithNotes(); loadInstrumentSelects(); loadCCRouting();
   }
@@ -1518,6 +1594,7 @@ function openInstrumentModal() {
   document.getElementById('mi-bus').value = '0';
   document.getElementById('mi-latency').value = '10';
   document.getElementById('mi-autocal').value = '0';
+  document.getElementById('mi-gm').value = '-1';
   document.getElementById('modal-inst-title').textContent = 'New instrument';
   document.getElementById('modal-instrument').classList.add('show');
 }
@@ -1531,6 +1608,8 @@ function editInstrument(idx) {
   document.getElementById('mi-bus').value = inst.bus_id;
   document.getElementById('mi-latency').value = inst.latency_ms;
   document.getElementById('mi-autocal').value = inst.auto_cal ? '1' : '0';
+  document.getElementById('mi-gm').value =
+    (inst.gm_program === undefined || inst.gm_program === null) ? '-1' : String(inst.gm_program);
   document.getElementById('modal-inst-title').textContent = 'Edit ' + inst.name;
   document.getElementById('modal-instrument').classList.add('show');
 }
@@ -1619,6 +1698,7 @@ async function saveInstrument() {
     bus_id: parseInt(document.getElementById('mi-bus').value),
     latency_ms: parseInt(document.getElementById('mi-latency').value),
     auto_cal: document.getElementById('mi-autocal').value === '1',
+    gm_program: parseInt(document.getElementById('mi-gm').value),
     enabled: true
   };
   if (editingInstrumentIdx >= 0) data.index = editingInstrumentIdx;
@@ -1944,10 +2024,66 @@ async function loadMidiConfig() {
   document.getElementById('midi-udp').checked = d.udp_enabled;
   document.getElementById('midi-rtp').checked = d.rtp_enabled;
   el('midi-rx-pin', d.serial_rx_pin);
+  document.getElementById('midi-tx-pin').value =
+    (d.serial_tx_pin === undefined || d.serial_tx_pin === null) ? -1 : d.serial_tx_pin;
   el('midi-udp-port', d.udp_port);
   el('midi-rtp-port', d.rtp_port);
   document.getElementById('midi-jitter').value = d.jitter_buffer_ms;
   el('midi-jitter-val', d.jitter_buffer_ms);
+}
+
+// ============================================================================
+// General-Midi-Boop v2 diagnostics (read-only: nothing here is entered by hand)
+// ============================================================================
+async function loadGmbStatus() {
+  const d = await api('/api/gmb/status');
+  const tbody = document.getElementById('gmb-inst-table');
+  if (!d) {
+    if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="color:var(--fg2)">Unavailable.</td></tr>';
+    return;
+  }
+  el('gmb-proto', d.protocol || '');
+  el('gmb-instance', d.instance_id || '');
+  el('gmb-rev', d.revision);
+  el('gmb-size', d.descriptor_size);
+  el('gmb-chunks', d.chunk_count);
+  el('gmb-detail', d.overflow ? 'DOES NOT FIT' : (d.degraded ? 'reduced detail' : 'full'));
+  el('gmb-insts', d.logical_instruments);
+  el('gmb-notes', d.playable_notes);
+  el('gmb-rejected', d.rejected_mappings > 0
+      ? (d.rejected_mappings + ' mapping(s) not announced (disabled or unusable)') : '');
+  el('gmb-http', d.http_descriptor ? 'yes' : 'no');
+  el('gmb-push', d.push_notify ? 'yes' : 'no');
+
+  const rows = d.instruments || [];
+  if (!tbody) return;
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="color:var(--fg2)">No instrument configured yet.</td></tr>';
+  } else {
+    let html = '';
+    for (const r of rows) {
+      html += '<tr>';
+      html += '<td>' + (r.channel + 1) + '</td>';
+      html += '<td>' + esc(r.name || '') + '</td>';
+      html += '<td style="font-family:monospace;font-size:11px">' + esc(r.type || '') + '</td>';
+      html += '<td>' + r.notes + ' (' + esc(r.mode || '') + ')</td>';
+      html += '<td>' + (r.velocity ? 'yes' : 'no') + '</td>';
+      html += '<td>' + r.polyphony + '</td>';
+      html += '<td>' + (r.configured
+        ? '<span class="badge on">announced</span>'
+        : '<span class="badge off">not configured</span>') + '</td>';
+      html += '</tr>';
+    }
+    tbody.innerHTML = html;
+  }
+
+  const sx = d.sysex || {};
+  el('gmb-traffic',
+     'Handshakes ' + (sx.handshakes || 0) +
+     ' \u00b7 descriptor requests ' + (sx.chunk_requests || 0) +
+     ' \u00b7 notifications ' + (sx.notifications || 0) +
+     ' \u00b7 ignored frames ' + (sx.invalid || 0) +
+     ' \u00b7 rate-limited ' + (sx.rate_limited || 0));
 }
 
 async function updateMidiConfig() {
@@ -1955,6 +2091,7 @@ async function updateMidiConfig() {
     serial_enabled: document.getElementById('midi-serial').checked,
     udp_enabled: document.getElementById('midi-udp').checked,
     rtp_enabled: document.getElementById('midi-rtp').checked,
+    serial_tx_pin: parseInt(document.getElementById('midi-tx-pin').value),
     jitter_buffer_ms: parseInt(document.getElementById('midi-jitter').value)
   });
 }

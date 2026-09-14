@@ -77,6 +77,13 @@ static void onAppleMidiNoteOff(byte channel, byte note, byte velocity) {
     g_transportInstance->deliverMessage(msg, MIDI_SOURCE_RTP);
 }
 
+// AppleMIDI delivers a COMPLETE SysEx frame with 0xF0/0xF7 included.
+static void onAppleMidiSysEx(byte* data, unsigned size) {
+    if (g_transportInstance == nullptr || data == nullptr) return;
+    if (size == 0 || size > 0xFFFF) return;
+    g_transportInstance->deliverSysEx((const uint8_t*)data, (uint16_t)size, MIDI_SOURCE_RTP);
+}
+
 static void onAppleMidiControlChange(byte channel, byte number, byte value) {
     if (g_transportInstance == nullptr) return;
 
@@ -104,10 +111,22 @@ MidiTransport::MidiTransport(JitterBuffer& jitterBuffer)
       _udpActive(false),
       _rtpActive(false),
       _disconnectHandler(nullptr),
+      _sysexHandler(nullptr),
+      _sysexCtx(nullptr),
+      _serialTxActive(false),
+      _udpPeerPort(0),
+      _udpPeerValid(false),
+      _sysexIn(0),
+      _sysexOut(0),
       _serialBytes(0),
       _udpPackets(0),
       _rtpPackets(0) {
     memset(&_config, 0, sizeof(_config));
+}
+
+void MidiTransport::setSysExHandler(SysExHandler handler, void* ctx) {
+    _sysexHandler = handler;
+    _sysexCtx = ctx;
 }
 
 void MidiTransport::setDisconnectHandler(void (*handler)()) {
@@ -167,11 +186,20 @@ uint32_t MidiTransport::getRtpPacketCount() const { return _rtpPackets; }
 // Serial MIDI Initialization (Serial2, 31250 baud)
 // ============================================================================
 bool MidiTransport::initSerial() {
-    Serial2.begin(MIDI_SERIAL_BAUD, SERIAL_8N1, _config.serial_rx_pin, -1);
+    // A TX pin turns DIN into a bidirectional port. Without it the device can
+    // receive notes but can never answer a discovery handshake, so GMB has to
+    // be configured manually (docs/SYSEX_IDENTITY.md §8: "DIN IN seul -> non").
+    int8_t tx = (_config.serial_tx_pin == MIDI_SERIAL_TX_DISABLED)
+              ? -1 : (int8_t)_config.serial_tx_pin;
+    Serial2.begin(MIDI_SERIAL_BAUD, SERIAL_8N1, _config.serial_rx_pin, tx);
     _serialParser.reset();
     _serialActive = true;
-    Serial.printf("[MIDI-TR] Serial MIDI active (GPIO %d, %d baud)\n",
-                  _config.serial_rx_pin, MIDI_SERIAL_BAUD);
+    _serialTxActive = (tx >= 0);
+    char tx_label[8];
+    if (_serialTxActive) snprintf(tx_label, sizeof(tx_label), "%d", (int)tx);
+    else                 strlcpy(tx_label, "none", sizeof(tx_label));
+    Serial.printf("[MIDI-TR] Serial MIDI active (RX GPIO %d, TX %s, %d baud)\n",
+                  _config.serial_rx_pin, tx_label, MIDI_SERIAL_BAUD);
     return true;
 }
 
@@ -205,6 +233,7 @@ bool MidiTransport::initRTP() {
     AppleRTP.setHandleNoteOn(onAppleMidiNoteOn);
     AppleRTP.setHandleNoteOff(onAppleMidiNoteOff);
     AppleRTP.setHandleControlChange(onAppleMidiControlChange);
+    AppleRTP.setHandleSystemExclusive(onAppleMidiSysEx);
     AppleRTP.begin(MIDI_CHANNEL_OMNI);
 
     _rtpActive = true;
@@ -233,6 +262,9 @@ void MidiTransport::pollSerial() {
             MidiMessage msg = _serialParser.getMessage();
             deliverMessage(msg, MIDI_SOURCE_SERIAL);
         }
+        // feed() only reports channel messages; a completed SysEx frame is
+        // collected separately.
+        drainSysEx(_serialParser, MIDI_SOURCE_SERIAL);
     }
 }
 
@@ -243,6 +275,11 @@ void MidiTransport::pollUDP() {
     int packetSize = _udp.parsePacket();
     if (packetSize > 0) {
         _udpPackets++;
+        // Remember the sender so a SysEx reply (and later notifications) can be
+        // routed back to the controller that asked.
+        _udpPeerIP = _udp.remoteIP();
+        _udpPeerPort = _udp.remotePort();
+        _udpPeerValid = (_udpPeerPort != 0);
         uint8_t buf[256];
         // AUDIT FIX: drain the WHOLE datagram in chunks. Previously any bytes
         // past 256 were discarded; because _udpParser persists across packets, a
@@ -259,6 +296,7 @@ void MidiTransport::pollUDP() {
                     MidiMessage msg = _udpParser.getMessage();
                     deliverMessage(msg, MIDI_SOURCE_UDP);
                 }
+                drainSysEx(_udpParser, MIDI_SOURCE_UDP);
             }
             remaining -= len;
         }
@@ -288,4 +326,74 @@ void MidiTransport::deliverMessage(MidiMessage& msg, MidiTransportSource source)
     if (source == MIDI_SOURCE_RTP) {
         _rtpPackets++;
     }
+}
+
+// ============================================================================
+// SysEx (control plane)
+// ============================================================================
+
+void MidiTransport::drainSysEx(MidiParser& parser, MidiTransportSource source) {
+    if (!parser.hasSysEx()) return;
+    // Deliver first, release after: the frame lives in the parser's own buffer.
+    deliverSysEx(parser.sysExData(), parser.sysExLength(), source);
+    parser.clearSysEx();
+}
+
+void MidiTransport::deliverSysEx(const uint8_t* frame, uint16_t len,
+                                 MidiTransportSource source) {
+    _sysexIn++;
+    if (_sysexHandler != nullptr) _sysexHandler(frame, len, source, _sysexCtx);
+}
+
+bool MidiTransport::canSendSysEx(MidiTransportSource source) const {
+    switch (source) {
+        case MIDI_SOURCE_SERIAL: return _serialActive && _serialTxActive;
+        case MIDI_SOURCE_UDP:    return _udpActive && _udpPeerValid;
+        case MIDI_SOURCE_RTP:    return _rtpActive;
+        default:                 return false;
+    }
+}
+
+bool MidiTransport::anyBidirectional() const {
+    return canSendSysEx(MIDI_SOURCE_SERIAL) ||
+           (_udpActive) ||          // a UDP peer appears as soon as one talks
+           canSendSysEx(MIDI_SOURCE_RTP);
+}
+
+bool MidiTransport::sendSysEx(MidiTransportSource source, const uint8_t* data,
+                              uint16_t len) {
+    if (data == nullptr || len < 2) return false;
+    if (!canSendSysEx(source)) return false;
+
+    switch (source) {
+        case MIDI_SOURCE_SERIAL:
+            Serial2.write(data, len);
+            _sysexOut++;
+            return true;
+
+        case MIDI_SOURCE_UDP: {
+            if (!_udp.beginPacket(_udpPeerIP, _udpPeerPort)) return false;
+            _udp.write(data, len);
+            bool ok = _udp.endPacket();
+            if (ok) _sysexOut++;
+            return ok;
+        }
+
+        case MIDI_SOURCE_RTP:
+            // The frame already carries its 0xF0/0xF7 boundaries.
+            AppleRTP.sendSysEx(len, data, true);
+            _sysexOut++;
+            return true;
+
+        default:
+            return false;
+    }
+}
+
+uint8_t MidiTransport::broadcastSysEx(const uint8_t* data, uint16_t len) {
+    uint8_t sent = 0;
+    if (sendSysEx(MIDI_SOURCE_SERIAL, data, len)) sent++;
+    if (sendSysEx(MIDI_SOURCE_UDP, data, len))    sent++;
+    if (sendSysEx(MIDI_SOURCE_RTP, data, len))    sent++;
+    return sent;
 }

@@ -20,6 +20,12 @@
 // Each transport has its own MIDI parser.
 // Parsed messages are inserted into the JitterBuffer.
 //
+// A complete SysEx frame is handed to the registered handler together with the
+// transport it came from, so a reply goes back the way the request arrived.
+// Automatic General-Midi-Boop discovery is only possible where that return path
+// exists (docs/SYSEX_IDENTITY.md §8): DIN needs a MIDI OUT pin, UDP answers the
+// datagram's sender, RTP-MIDI answers the session.
+//
 
 class MidiTransport {
 public:
@@ -44,6 +50,31 @@ public:
     // Delivers a parsed message to the jitter buffer (public for AppleMIDI callbacks)
     void deliverMessage(MidiMessage& msg, MidiTransportSource source);
 
+    // --- SysEx (control plane) ---
+
+    // Invoked with one COMPLETE frame (F0 ... F7) and the transport it arrived
+    // on. Runs on the loop task, never in a real-time context.
+    typedef void (*SysExHandler)(const uint8_t* frame, uint16_t len,
+                                 MidiTransportSource source, void* ctx);
+    void setSysExHandler(SysExHandler handler, void* ctx);
+
+    // Public for the AppleMIDI SysEx callback.
+    void deliverSysEx(const uint8_t* frame, uint16_t len, MidiTransportSource source);
+
+    // True when a SysEx reply can actually leave on that transport.
+    bool canSendSysEx(MidiTransportSource source) const;
+    // True when at least one transport can answer — i.e. automatic discovery
+    // and push notifications are possible at all.
+    bool anyBidirectional() const;
+
+    // Send one complete SysEx frame (F0 ... F7 included).
+    bool sendSysEx(MidiTransportSource source, const uint8_t* data, uint16_t len);
+    // Fan a notification out to every transport that can carry it.
+    uint8_t broadcastSysEx(const uint8_t* data, uint16_t len);
+
+    uint32_t getSysExInCount() const  { return _sysexIn; }
+    uint32_t getSysExOutCount() const { return _sysexOut; }
+
     // AUDIT FIX: handler invoked when an RTP-MIDI session disconnects, so held
     // notes from that source can be released (set to MidiDispatcher::allNotesOff
     // via a thin wrapper in setup).
@@ -66,6 +97,19 @@ private:
     // RTP-MIDI (AppleMIDI)
     bool _rtpActive;
     void (*_disconnectHandler)();
+
+    // SysEx plumbing
+    SysExHandler _sysexHandler;
+    void*        _sysexCtx;
+    bool         _serialTxActive;      // a MIDI OUT pin is configured
+    IPAddress    _udpPeerIP;           // last UDP sender (reply / notification)
+    uint16_t     _udpPeerPort;
+    bool         _udpPeerValid;
+    uint32_t     _sysexIn;
+    uint32_t     _sysexOut;
+
+    // Drain a parser's pending SysEx frame, if any.
+    void drainSysEx(MidiParser& parser, MidiTransportSource source);
 
     // Stats
     uint32_t _serialBytes;

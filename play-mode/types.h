@@ -121,6 +121,12 @@ struct SchedulerEvent {
 // --- Instrument configuration ---
 struct InstrumentConfig {
     char name[32];               // Instrument name
+    // Musical profile of this logical instrument, as a General MIDI program
+    // (0-127), or GMB_GM_PROGRAM_NONE (0xFF) when the user has not chosen one.
+    // This is the ONLY musical-identity field: the General-Midi-Boop descriptor
+    // derives type/subtype from it, so there is no second vocabulary to keep in
+    // sync, and nothing is ever inferred from actuator topology.
+    uint8_t gm_program;
     uint8_t midi_channel;        // Assigned MIDI channel (0-15)
     uint8_t bus_id;              // Dedicated I²C bus
     uint8_t actuator_ids[MAX_ACTUATORS_PER_INSTRUMENT]; // Associated actuator IDs

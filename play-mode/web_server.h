@@ -17,6 +17,7 @@ class PCADriver;
 class ActuatorEngine;
 class Calibrator;
 class TestManager;
+class GmbRuntime;
 
 // ============================================================================
 // PlayMode — Web Server (Phase 6)
@@ -46,6 +47,11 @@ public:
 
     // Registers the test manager (Phase 8, optional)
     void setTestManager(TestManager* testManager);
+
+    // Registers the General-Midi-Boop runtime. The web server serves the SAME
+    // cached descriptor the SysEx path serves — there is only one serializer —
+    // and asks for a capability rebuild after every configuration change.
+    void setGmb(GmbRuntime* gmb);
 
     // Starts the HTTP + WebSocket server
     bool begin();
@@ -79,6 +85,12 @@ private:
     ActuatorEngine*  _engine;
     Calibrator*      _calibrator;
     TestManager*     _testManager;
+    GmbRuntime*      _gmb;
+
+    // A configuration write landed. Cheap and safe from the async task: the
+    // rebuild itself happens on the main loop, and a write that changed nothing
+    // effective leaves the revision alone.
+    void notifyGmbConfigChanged();
 
     // Timing WebSocket broadcast
     uint32_t _last_ws_broadcast_ms;
@@ -170,6 +182,10 @@ private:
                               uint8_t* data, size_t len);
     void handlePostTestStop(AsyncWebServerRequest* request);
     void handlePostTestClearLog(AsyncWebServerRequest* request);
+
+    // --- General-Midi-Boop v2 ---
+    void handleGetGmbDescriptor(AsyncWebServerRequest* request);
+    void handleGetGmbStatus(AsyncWebServerRequest* request);
 
     // --- Log Manager (Phase 9) ---
     void handleGetLogs(AsyncWebServerRequest* request);

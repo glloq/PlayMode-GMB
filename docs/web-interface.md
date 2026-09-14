@@ -45,7 +45,9 @@ Dark GitHub-style theme (#0d1117 bg, #58a6ff accent, #3fb950 success, #f85149 er
 * **Creation**:
   * "Wizard" button → 4-step assistant (identity, type, MIDI notes, summary)
   * "+ Manual" button → full modal
-* **Editing**: modal with all parameters
+* **Editing**: modal with all parameters, including the **instrument type**
+  (xylophone, bells, piano, kalimba…) — the one musical field General-Midi-Boop
+  needs; everything else it learns is derived from actuators and mappings
 * **Deletion**: confirmation via themed `appConfirm()`
 * **Virtual piano(s)**: one interactive keyboard per instrument
   * Visual MIDI notes, touch scrolling
@@ -54,13 +56,21 @@ Dark GitHub-style theme (#0d1117 bg, #58a6ff accent, #3fb950 success, #f85149 er
 ### 2.4 MIDI Page
 
 * **MIDI transports**: 3 dedicated cards with toggle + status:
-  * MIDI Cable (DIN / TRS) — Serial 31250 baud, GPIO 4
+  * MIDI Cable (DIN / TRS) — Serial 31250 baud, GPIO 4 IN, optional OUT pin
+    (without a MIDI OUT the cable cannot answer a General-Midi-Boop handshake)
   * WiFi — raw UDP (port 5004)
   * WiFi — Apple / RTP-MIDI (AppleMIDI, synchronized)
 * **Jitter buffer**: slider 10–80 ms (default 30 ms)
   * Help text: "Anti-jitter buffer for network MIDI"
 * **Received MIDI messages**: real-time table (type, channel, note, velocity, source, timestamp)
   * Pause / clear buttons
+* **Automatic recognition** (read-only diagnostics, nothing is entered by hand):
+  * identity (protocol, instance id, descriptor revision), descriptor size /
+    segment count, and a link to `/gmb/descriptor.json`
+  * what is announced: logical instruments, playable notes, mappings left out
+  * reachability: HTTP descriptor and push notifications
+  * per-instrument table (channel, type, notes, velocity, polyphony, state) and
+    SysEx traffic counters — see [General-Midi-Boop v2](gmb-v2.md)
 
 ### 2.5 Actuators Page
 

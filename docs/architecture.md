@@ -21,6 +21,7 @@
 | **WiFi Manager** | `wifi_manager.h/.cpp` | STA mode + automatic AP fallback, mDNS (`hostname.local`), captive portal |
 | **Web Server** | `web_server.h/.cpp` | REST API (38+ endpoints) + real-time WebSocket, ESPAsyncWebServer |
 | **Web UI** | `web_ui.h` | Embedded HTML/CSS/JS interface (PROGMEM), dark theme, ~3000 lines |
+| **GMB v2** | `gmb_*.h/.cpp` | General-Midi-Boop automatic recognition: capability snapshot from the active configuration, cached ASCII descriptor, SysEx handshake / chunked transfer / change notification, persistent revision ([details](gmb-v2.md)) |
 
 ## Configuration and Type Files
 
@@ -29,6 +30,7 @@
 | `config.h` | ~150 global constants (#define): GPIO, frequencies, limits, buffer sizes |
 | `types.h` | Shared data structures: ActuatorConfig, InstrumentConfig, SchedulerEvent, PowerBudget, etc. |
 | `midi_types.h` | MIDI types: MidiMessage, MidiInputConfig, WiFiConfig, transport/message enumerations |
+| `gmb_protocol.h` | General-Midi-Boop v2 wire constants, frame sizes and limits |
 
 ## Data Flow
 
