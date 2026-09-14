@@ -327,7 +327,32 @@ follows when the handshake raises flag bit 0. It carries `X-GMB-Revision`.
 
 ---
 
-## 11. Tests
+## 11. Footprint
+
+Measured on `esp32dev` (PlatformIO `pio run`), against the same build without
+the GMB layer:
+
+| | before | after | delta |
+|---|---|---|---|
+| RAM | 91 984 B (28.1 %) | 109 312 B (33.4 %) | **+17 328 B** |
+| Flash | 1 252 645 B (95.6 %) | 1 280 705 B (97.7 %) | **+28 060 B** |
+
+The RAM is all accounted for and static: 12 288 B of descriptor cache (two
+6 KiB buffers so a pinned transfer is never overwritten), a 3 504 B capability
+snapshot, a 168 B change digest, ~1 KiB of builder scratch, and 24 B of SysEx
+capture per MIDI parser. Nothing is allocated per MIDI event.
+
+> **Flash budget.** The default `esp32dev` partition table gives the
+> application 1 310 720 B, and PlayMode was already at 95.6 % of it before this
+> work; it is now at 97.7 %, leaving ~30 KB. That is enough to build and link,
+> but not much room for the next feature. Raising it is a one-line change in
+> `platformio.ini` (`board_build.partitions = min_spiffs.csv` for 1.875 MB, or
+> `huge_app.csv` for 3 MB without OTA) — deliberately **not** done here,
+> because changing the partition table moves the LittleFS partition and a
+> device reflashed with it loses its stored configuration. That trade-off is
+> the maintainer's call.
+
+## 12. Tests
 
 `make -C test` builds and runs the native suite (no ESP32 toolchain needed; it
 also runs in CI). It covers the handshake byte layout, instance-id stability,
