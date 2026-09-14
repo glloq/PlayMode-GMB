@@ -277,6 +277,22 @@ const char* GmbRuntime::pinnedData(int8_t handle, uint16_t& len, uint32_t& revis
 
 #if defined(ARDUINO)
 
+// Parse one unsigned decimal number, advancing `p`. Returns false when there is
+// no digit at all. Hand-rolled on purpose: sscanf() drags the whole formatted-
+// input machinery into a firmware that is already tight on flash, for two
+// integers.
+static bool parseU32(const char*& p, uint32_t& out) {
+    while (*p == ' ' || *p == '\t') p++;
+    if (*p < '0' || *p > '9') return false;
+    uint32_t v = 0;
+    while (*p >= '0' && *p <= '9') {
+        v = v * 10u + (uint32_t)(*p - '0');
+        p++;
+    }
+    out = v;
+    return true;
+}
+
 bool GmbFsRevisionStore::load(uint32_t& revision, uint32_t& hash) {
     if (!LittleFS.exists(GMB_REVISION_PATH)) return false;
     File f = LittleFS.open(GMB_REVISION_PATH, "r");
@@ -285,20 +301,34 @@ bool GmbFsRevisionStore::load(uint32_t& revision, uint32_t& hash) {
     size_t n = f.readBytes(line, sizeof(line) - 1);
     f.close();
     line[n] = '\0';
-    unsigned long rev = 0, h = 0;
-    if (sscanf(line, "%lu %lu", &rev, &h) != 2) return false;
-    revision = (uint32_t)rev;
-    hash = (uint32_t)h;
+
+    const char* p = line;
+    uint32_t rev = 0, h = 0;
+    if (!parseU32(p, rev)) return false;
+    if (!parseU32(p, h))   return false;
+    revision = rev;
+    hash = h;
     return true;
+}
+
+// Append an unsigned decimal number at `pos`, returning the new length.
+static size_t writeU32(char* buf, size_t pos, uint32_t v) {
+    char tmp[11];
+    uint8_t n = 0;
+    if (v == 0) tmp[n++] = '0';
+    while (v > 0) { tmp[n++] = (char)('0' + (v % 10u)); v /= 10u; }
+    while (n > 0) buf[pos++] = tmp[--n];
+    return pos;
 }
 
 bool GmbFsRevisionStore::save(uint32_t revision, uint32_t hash) {
     File f = LittleFS.open(GMB_REVISION_TMP_PATH, "w");
     if (!f) return false;
     char line[48];
-    int n = snprintf(line, sizeof(line), "%lu %lu",
-                     (unsigned long)revision, (unsigned long)hash);
-    bool ok = (n > 0) && (f.write((const uint8_t*)line, (size_t)n) == (size_t)n);
+    size_t n = writeU32(line, 0, revision);
+    line[n++] = ' ';
+    n = writeU32(line, n, hash);
+    bool ok = (f.write((const uint8_t*)line, n) == n);
     f.close();
     if (!ok) { LittleFS.remove(GMB_REVISION_TMP_PATH); return false; }
     // Atomic replace so a power cut cannot leave a half-written counter.
