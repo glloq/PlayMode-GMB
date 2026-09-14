@@ -61,6 +61,16 @@ Calibrator calibrator(scheduler, configManager);
 // --- Global objects (Phase 8) ---
 TestManager testManager(scheduler, configManager);
 
+// --- LED Status ---
+// NOTE: this enum must stay ABOVE the first function definition in this sketch.
+// The Arduino builder hoists auto-generated prototypes to just before the first
+// function, so a type used by one of them (ledSet(LedState)) has to be declared
+// earlier or the generated prototype does not compile.
+enum LedState { LED_OFF, LED_BOOT, LED_AP, LED_STA, LED_ERROR };
+static LedState ledState = LED_BOOT;
+static uint32_t ledLastToggle = 0;
+static bool     ledOn = false;
+
 // --- General-Midi-Boop v2 (automatic recognition + capability descriptor) ---
 // Control plane only: it runs from loop(), never from a MIDI callback or the
 // real-time scheduler task, and it never touches an actuator.
@@ -113,12 +123,6 @@ static void gmbRefreshFlags() {
     gmbRuntime.setHttpAvailable(webServer.isRunning());
     gmbRuntime.setPushAvailable(midiTransport.anyBidirectional());
 }
-
-// --- LED Status ---
-enum LedState { LED_OFF, LED_BOOT, LED_AP, LED_STA, LED_ERROR };
-static LedState ledState = LED_BOOT;
-static uint32_t ledLastToggle = 0;
-static bool     ledOn = false;
 
 void ledInit() {
     pinMode(LED_STATUS_PIN, OUTPUT);
