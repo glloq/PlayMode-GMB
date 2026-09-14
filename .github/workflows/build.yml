@@ -7,6 +7,17 @@ on:
   pull_request:
 
 jobs:
+  # Native (host) tests for the General-Midi-Boop v2 capability layer. No ESP32
+  # toolchain needed, so regressions surface in seconds instead of after a full
+  # firmware build.
+  native-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run native GMB tests
+        run: make -C test
+
   build:
     runs-on: ubuntu-latest
     steps:

@@ -9,8 +9,13 @@ MidiParser::MidiParser()
       _data_index(0),
       _expected_length(0),
       _in_sysex(false),
-      _ready(false) {
+      _ready(false),
+      _sysex_len(0),
+      _sysex_ready(false),
+      _sysex_overflow(false),
+      _sysex_oversized(0) {
     memset(&_message, 0, sizeof(_message));
+    memset(_sysex_buf, 0, sizeof(_sysex_buf));
 }
 
 void MidiParser::reset() {
@@ -19,6 +24,9 @@ void MidiParser::reset() {
     _expected_length = 0;
     _in_sysex = false;
     _ready = false;
+    _sysex_len = 0;
+    _sysex_ready = false;
+    _sysex_overflow = false;
     memset(&_message, 0, sizeof(_message));
 }
 
@@ -39,7 +47,16 @@ bool MidiParser::feed(uint8_t byte) {
 
     // --- Data byte (bit 7 = 0) ---
     if (_in_sysex) {
-        // Ignore SysEx data bytes
+        // Capture the payload while it still fits. Past the buffer the frame is
+        // marked oversized: it is consumed to the end and then discarded, never
+        // truncated into something that could be mistaken for a valid request.
+        if (!_sysex_overflow) {
+            if (_sysex_len < GMB_SYSEX_IN_MAX - 1) {
+                _sysex_buf[_sysex_len++] = byte;
+            } else {
+                _sysex_overflow = true;
+            }
+        }
         return false;
     }
 
@@ -58,17 +75,35 @@ void MidiParser::handleStatusByte(uint8_t byte) {
     if (byte == 0xF0) {
         _in_sysex = true;
         _running_status = 0;
+        // A new F0 abandons whatever was being captured (and any frame not yet
+        // consumed by the caller), so a truncated stream cannot be spliced.
+        _sysex_len = 0;
+        _sysex_ready = false;
+        _sysex_overflow = false;
+        _sysex_buf[_sysex_len++] = byte;
         return;
     }
 
     // SysEx end
     if (byte == 0xF7) {
+        if (_in_sysex) {
+            if (_sysex_overflow || _sysex_len >= GMB_SYSEX_IN_MAX) {
+                _sysex_oversized++;
+                _sysex_len = 0;
+            } else {
+                _sysex_buf[_sysex_len++] = byte;
+                _sysex_ready = true;
+            }
+        }
         _in_sysex = false;
+        _sysex_overflow = false;
         return;
     }
 
-    // Ignore common system messages (0xF1-0xF6)
+    // Ignore common system messages (0xF1-0xF6). Per the MIDI spec any status
+    // byte aborts an in-flight SysEx, so drop the partial capture too.
     if (byte >= 0xF1 && byte <= 0xF6) {
+        if (_in_sysex) { _in_sysex = false; _sysex_len = 0; _sysex_overflow = false; }
         // Tune Request (0xF6) has no data bytes
         // The others (MTC Quarter Frame, Song Position, Song Select) have 1-2 data bytes
         // We ignore all of them for simplicity
@@ -76,7 +111,8 @@ void MidiParser::handleStatusByte(uint8_t byte) {
         return;
     }
 
-    // Channel messages (0x80-0xEF)
+    // Channel messages (0x80-0xEF) — these also abort an in-flight SysEx.
+    if (_in_sysex) { _sysex_len = 0; _sysex_overflow = false; }
     _in_sysex = false;
     _running_status = byte;
     _data_index = 0;

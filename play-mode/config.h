@@ -100,6 +100,10 @@
 // --- MIDI Input ---
 #define MIDI_SERIAL_BAUD         31250   // Standard MIDI baud rate
 #define MIDI_SERIAL_RX_PIN       4       // GPIO for Serial MIDI input (Serial2 RX)
+// GPIO for Serial MIDI output (Serial2 TX). 0xFF = no MIDI OUT wired, which
+// means no SysEx return path and therefore no automatic GMB discovery on DIN.
+#define MIDI_SERIAL_TX_DISABLED  0xFF
+#define MIDI_SERIAL_TX_PIN       MIDI_SERIAL_TX_DISABLED
 // AUDIT FIX (P0.4): raw UDP-MIDI and RTP-MIDI (AppleMIDI) must not share a
 // port. AppleMIDI reserves the control port (rtp_port) AND the data port
 // (rtp_port + 1), so raw UDP is moved clear of that pair. RTP-MIDI keeps the
@@ -137,6 +141,10 @@
 // --- Firmware identity ---
 #define FW_VERSION              "0.9"
 #define FW_BUILD                (__DATE__ " " __TIME__)
+// Numeric form for the GMB handshake (block 1 carries major/minor/patch bytes).
+#define FW_VERSION_MAJOR        0
+#define FW_VERSION_MINOR        9
+#define FW_VERSION_PATCH        0
 
 // --- Serial ---
 #define SERIAL_BAUD_RATE        115200
@@ -189,8 +197,18 @@
 // AUDIT FIX (P1.1): v8 migrates the MIDI channel representation. Pre-v8 files
 // stored the UI convention (0=Omni, 1..16); v8 stores the internal form
 // (0..15, or MIDI_CHANNEL_OMNI_INTERNAL). Also adds WiFiConfig::ap_password.
-#define CONFIG_VERSION          8
+// v9 adds InstrumentConfig::gm_program (the musical profile the GMB descriptor
+// derives type/subtype from) and MidiInputConfig::serial_tx_pin (DIN MIDI OUT,
+// required for SysEx discovery on the serial transport). Both default to
+// "unset", so a v8 file loads unchanged.
+#define CONFIG_VERSION          9
 #define CONFIG_VERSION_CHANNELS_INTERNAL 8   // first version with internal channels
+
+// --- General-Midi-Boop v2 persistence ---
+// Capability revision + descriptor hash. Tiny, rewritten only when an effective
+// capability change advances the revision (never on a plain reboot).
+#define GMB_REVISION_PATH       "/gmb_rev.txt"
+#define GMB_REVISION_TMP_PATH   "/gmb_rev.tmp"
 
 // AUDIT FIX (P2-3): hard upper bound on an imported config blob. deserializeJson
 // builds an elastic document proportional to input size, so an oversized upload

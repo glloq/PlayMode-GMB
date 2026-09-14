@@ -34,6 +34,8 @@
 #include "test_manager.h"
 #include "log_manager.h"
 #include "web_server.h"
+#include "gmb_runtime.h"
+#include "gmb_instance_id.h"
 
 // --- Global objects (Phase 1) ---
 PCADriver      pcaDriver;
@@ -58,6 +60,59 @@ Calibrator calibrator(scheduler, configManager);
 
 // --- Global objects (Phase 8) ---
 TestManager testManager(scheduler, configManager);
+
+// --- General-Midi-Boop v2 (automatic recognition + capability descriptor) ---
+// Control plane only: it runs from loop(), never from a MIDI callback or the
+// real-time scheduler task, and it never touches an actuator.
+GmbFsRevisionStore gmbRevisionStore;
+GmbRuntime         gmbRuntime;
+
+// True once the active configuration has been loaded and validated. An
+// instrument is only ever announced as `configured` when this holds.
+static bool gmbConfigValid = false;
+
+// The capability snapshot is ALWAYS derived from the active validated
+// configuration — there is no separate, hand-maintained GMB profile.
+static void gmbFillBuildInput(GmbBuildInput& in) {
+    in.actuators        = configManager.getActuators();
+    in.actuator_count   = configManager.getActuatorCount();
+    in.instruments      = configManager.getInstruments();
+    in.instrument_count = configManager.getInstrumentCount();
+    in.routings         = configManager.getRoutingConfigs();
+    in.routing_count    = configManager.getRoutingCount();
+    in.power            = configManager.getPowerBudget();
+    in.safety           = configManager.getSafetyLimits();
+    in.device_name      = configManager.getWiFiConfig()->hostname;
+    in.config_valid     = gmbConfigValid;
+}
+
+// A complete SysEx frame arrived. Answer on the SAME transport it came from.
+static void gmbOnSysEx(const uint8_t* frame, uint16_t len,
+                       MidiTransportSource source, void* ctx) {
+    (void)ctx;
+    GmbSysExService::Reply reply;
+    if (gmbRuntime.sysex().handleFrame(frame, len, millis(), reply)) {
+        midiTransport.sendSysEx(source, reply.data, reply.len);
+    }
+}
+
+// Block 0x11 fan-out: every transport that has a return path.
+static void gmbNotify(const uint8_t* data, uint16_t len, void* ctx) {
+    (void)ctx;
+    uint8_t sent = midiTransport.broadcastSysEx(data, len);
+    if (sent > 0) {
+        logger.log(LOG_INFO, CAT_MIDI, "GMB rev %u published (%d transport)",
+                   (unsigned)gmbRuntime.revision(), sent);
+    }
+}
+
+// Keep the handshake flags honest: they advertise what the device can actually
+// do right now, and they are NOT part of the descriptor, so they never churn
+// the capability revision.
+static void gmbRefreshFlags() {
+    gmbRuntime.setHttpAvailable(webServer.isRunning());
+    gmbRuntime.setPushAvailable(midiTransport.anyBidirectional());
+}
 
 // --- LED Status ---
 enum LedState { LED_OFF, LED_BOOT, LED_AP, LED_STA, LED_ERROR };
@@ -158,6 +213,7 @@ void setup() {
         Serial.println("[INIT] ERROR: Config Manager — entering SAFE MODE (outputs disabled)");
         logger.log(LOG_ERROR, CAT_SYSTEM, "Config Manager failed — SAFE MODE");
     } else {
+        gmbConfigValid = true;
         logger.log(LOG_INFO, CAT_SYSTEM, "Config: %d act, %d inst",
                    configManager.getActuatorCount(), configManager.getInstrumentCount());
     }
@@ -305,6 +361,9 @@ void setup() {
     midiDispatcher.refreshConfig();
     // AUDIT FIX: release held notes when an RTP-MIDI session drops.
     midiTransport.setDisconnectHandler([]() { midiDispatcher.allNotesOff(); });
+    // GMB discovery rides the same transports as the notes, but on the control
+    // plane: normal NoteOn/NoteOff/CC handling above is unchanged.
+    midiTransport.setSysExHandler(gmbOnSysEx, nullptr);
 
     // 11. Start the Web Server (Phase 6) — only if WiFi is active
     Serial.println("\n[INIT] Web Server...");
@@ -313,6 +372,7 @@ void setup() {
                          &pcaDriver, &actuatorEngine);
     webServer.setCalibrator(&calibrator);
     webServer.setTestManager(&testManager);
+    webServer.setGmb(&gmbRuntime);
     if (!wifiManager.isConnected() && !wifiManager.isAP()) {
         Serial.println("[INIT] Web Server skipped (WiFi not active)");
         logger.log(LOG_WARN, CAT_SYSTEM, "Web Server not started (WiFi disabled)");
@@ -324,6 +384,43 @@ void setup() {
                       wifiManager.getIP().toString().c_str(), WEB_SERVER_PORT);
         logger.log(LOG_INFO, CAT_SYSTEM, "Web UI at http://%s:%d",
                    wifiManager.getIP().toString().c_str(), WEB_SERVER_PORT);
+    }
+
+    // 11b. General-Midi-Boop v2: identity, persisted revision, first capability
+    // snapshot. Built here so the descriptor is ready before any controller can
+    // ask for it, and so the very first boot does not emit a change notification
+    // to nobody.
+    Serial.println("\n[INIT] General-Midi-Boop v2...");
+    {
+        GmbIdentity identity;
+        identity.instance_id = gmbInstanceId();
+        identity.fw_major = FW_VERSION_MAJOR;
+        identity.fw_minor = FW_VERSION_MINOR;
+        identity.fw_patch = FW_VERSION_PATCH;
+        gmbRuntime.begin(identity, &gmbRevisionStore);
+        gmbRuntime.setNotificationSink(gmbNotify, nullptr);
+        gmbRefreshFlags();
+
+        GmbBuildInput in;
+        gmbFillBuildInput(in);
+        gmbRuntime.rebuild(in, millis(), /*notify=*/false);
+
+        Serial.printf("[INIT] GMB instance 0x%08X, rev %u, descriptor %u B "
+                      "(%u chunk), %u instrument(s)\n",
+                      (unsigned)identity.instance_id,
+                      (unsigned)gmbRuntime.revision(),
+                      (unsigned)gmbRuntime.descriptorBytes(),
+                      (unsigned)gmbRuntime.chunkCount(),
+                      (unsigned)gmbRuntime.snapshot().instrument_count);
+        logger.log(LOG_INFO, CAT_MIDI, "GMB v2 ready: rev %u, %u B descriptor",
+                   (unsigned)gmbRuntime.revision(),
+                   (unsigned)gmbRuntime.descriptorBytes());
+        if (gmbRuntime.overflowed()) {
+            logger.log(LOG_WARN, CAT_MIDI, "GMB descriptor does not fit — not published");
+        } else if (gmbRuntime.degraded()) {
+            logger.log(LOG_WARN, CAT_MIDI, "GMB descriptor degraded (level %d)",
+                       gmbRuntime.detailLevel());
+        }
     }
 
     // 12. Initialize the Acoustic Calibrator (Phase 7)
@@ -432,6 +529,16 @@ void loop() {
         }
     }
 
+    // 5d. General-Midi-Boop control plane: rebuild the capability snapshot when
+    // the configuration changed, and age out a stale descriptor transfer. No
+    // JSON is ever generated in a MIDI callback — a rebuild only ever happens
+    // here, on the loop task.
+    {
+        GmbBuildInput gmb_in;
+        gmbFillBuildInput(gmb_in);
+        gmbRuntime.service(gmb_in, millis());
+    }
+
     // 6. Web Server update (WebSocket broadcast)
     webServer.update();
 
@@ -441,6 +548,7 @@ void loop() {
 
     if (now - last_status > 5000) {
         last_status = now;
+        gmbRefreshFlags();
 
         const PowerStats& pwr = resourceManager.getStats();
 

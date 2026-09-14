@@ -11,6 +11,8 @@
 #include "calibrator.h"
 #include "test_manager.h"
 #include "log_manager.h"
+#include "gmb_runtime.h"
+#include "gmb_instance_id.h"
 #include <ArduinoJson.h>
 
 // ============================================================================
@@ -85,6 +87,17 @@ namespace {
         return (uint8_t)(ui_channel - 1);                          // 1..16 -> 0..15
     }
 
+    // Musical profile as a General MIDI program (0-127). Anything absent,
+    // negative or out of range means "no profile chosen": the GMB descriptor
+    // then declares a generic supported type and omits gm_program entirely,
+    // rather than inventing one from the actuator topology.
+    uint8_t parseGmProgram(JsonVariantConst v) {
+        if (v.isNull()) return (uint8_t)GMB_GM_PROGRAM_NONE;
+        int program = v.as<int>();
+        if (program < 0 || program > 127) return (uint8_t)GMB_GM_PROGRAM_NONE;
+        return (uint8_t)program;
+    }
+
     int internalChannelToUi(uint8_t internal_channel) {
         if (internal_channel == MIDI_CHANNEL_OMNI_INTERNAL) return 0;
         if (internal_channel >= MIDI_CHANNEL_COUNT) return 0;      // defensive
@@ -126,6 +139,7 @@ WebServer::WebServer(uint16_t port)
     , _engine(nullptr)
     , _calibrator(nullptr)
     , _testManager(nullptr)
+    , _gmb(nullptr)
     , _last_ws_broadcast_ms(0)
     , _restart_at_ms(0)
 {
@@ -147,6 +161,14 @@ void WebServer::setModules(ConfigManager* config, Scheduler* scheduler,
 
 void WebServer::setCalibrator(Calibrator* calibrator) {
     _calibrator = calibrator;
+}
+
+void WebServer::setGmb(GmbRuntime* gmb) {
+    _gmb = gmb;
+}
+
+void WebServer::notifyGmbConfigChanged() {
+    if (_gmb != nullptr) _gmb->requestRebuild();
 }
 
 void WebServer::setTestManager(TestManager* testManager) {
@@ -552,6 +574,18 @@ void WebServer::setupAPIRoutes() {
         handlePostTestClearLog(req);
     });
 
+    // --- General-Midi-Boop v2 ---
+    // The descriptor endpoint is intentionally UNAUTHENTICATED and read-only:
+    // it is the path General-Midi-Boop follows when the handshake advertises
+    // flag bit 0, and it exposes exactly the capability document the SysEx
+    // transfer already hands out.
+    _server.on("/gmb/descriptor.json", HTTP_GET, [this](AsyncWebServerRequest* req) {
+        handleGetGmbDescriptor(req);
+    });
+    _server.on("/api/gmb/status", HTTP_GET, [this](AsyncWebServerRequest* req) {
+        handleGetGmbStatus(req);
+    });
+
     // --- Log Manager (Phase 9) ---
     _server.on("/api/logs", HTTP_GET, [this](AsyncWebServerRequest* req) {
         handleGetLogs(req);
@@ -584,6 +618,10 @@ void WebServer::handleGetInstruments(AsyncWebServerRequest* request) {
         JsonObject obj = arr.add<JsonObject>();
         obj["index"]   = i;
         obj["name"]    = instruments[i].name;
+        // Musical profile (General MIDI program). -1 = not configured; the GMB
+        // descriptor then declares a generic type and omits gm_program.
+        obj["gm_program"] = (instruments[i].gm_program <= 127)
+                          ? (int)instruments[i].gm_program : -1;
         obj["channel"] = internalChannelToUi(instruments[i].midi_channel);
         obj["bus_id"]  = instruments[i].bus_id;
         obj["actuator_count"] = instruments[i].actuator_count;
@@ -713,6 +751,9 @@ void WebServer::handleGetMidi(AsyncWebServerRequest* request) {
     doc["rtp_port"]         = midi->rtp_port;
     doc["jitter_buffer_ms"] = midi->jitter_buffer_ms;
     doc["serial_rx_pin"]    = midi->serial_rx_pin;
+    // -1 = no MIDI OUT wired: the DIN port cannot answer a GMB handshake.
+    doc["serial_tx_pin"]    = (midi->serial_tx_pin == MIDI_SERIAL_TX_DISABLED)
+                            ? -1 : (int)midi->serial_tx_pin;
 
     String output;
     serializeJson(doc, output);
@@ -845,6 +886,7 @@ void WebServer::handlePostInstrument(AsyncWebServerRequest* request,
 
     InstrumentConfig inst = {};
     strlcpy(inst.name, doc["name"] | "Instrument", sizeof(inst.name));
+    inst.gm_program         = parseGmProgram(doc["gm_program"]);
     inst.midi_channel       = uiChannelToInternal(doc["channel"] | 0);
     inst.bus_id             = doc["bus_id"] | 0;
     if (inst.bus_id > 1) inst.bus_id = 0;   // AUDIT FIX: clamp to a valid bus
@@ -896,6 +938,7 @@ void WebServer::handlePostInstrument(AsyncWebServerRequest* request,
         }
         instruments[idx] = inst;
         if (_dispatcher) _dispatcher->refreshConfig();
+        notifyGmbConfigChanged();
         request->send(200, "application/json", "{\"ok\":true}");
         return;
     }
@@ -915,6 +958,7 @@ void WebServer::handlePostInstrument(AsyncWebServerRequest* request,
             emptyRouting.instrument_index = newIdx;
             _config->addRoutingConfig(emptyRouting);
             if (_dispatcher) _dispatcher->refreshConfig();
+            notifyGmbConfigChanged();
             request->send(200, "application/json", "{\"ok\":true}");
         } else {
             request->send(400, "application/json",
@@ -1026,6 +1070,7 @@ void WebServer::handlePostSetupInstrument(AsyncWebServerRequest* request,
     // Build the instrument.
     InstrumentConfig inst = {};
     strlcpy(inst.name, doc["name"] | "Instrument", sizeof(inst.name));
+    inst.gm_program         = parseGmProgram(doc["gm_program"]);
     inst.midi_channel       = uiChannelToInternal(doc["channel"] | 0);
     inst.bus_id             = doc["bus_id"] | 0;
     inst.default_latency_ms = doc["latency_ms"] | 10;
@@ -1086,6 +1131,7 @@ void WebServer::handlePostSetupInstrument(AsyncWebServerRequest* request,
     if (_scheduler) _scheduler->syncActuators(_config->getActuators(),
                                               _config->getActuatorCount());
     if (_dispatcher) _dispatcher->refreshConfig();
+    notifyGmbConfigChanged();
     }  // actuator lock released here — flash write happens unlocked
 
     // Atomic save (outside the RT mutex). On failure, roll back under the lock.
@@ -1103,6 +1149,7 @@ void WebServer::handlePostSetupInstrument(AsyncWebServerRequest* request,
         if (_scheduler) _scheduler->syncActuators(_config->getActuators(),
                                                   _config->getActuatorCount());
         if (_dispatcher) _dispatcher->refreshConfig();
+        notifyGmbConfigChanged();
         request->send(500, "application/json", "{\"error\":\"save failed, rolled back\"}");
         return;
     }
@@ -1242,6 +1289,7 @@ void WebServer::handlePostActuator(AsyncWebServerRequest* request,
     }  // lock released here
 
     if (added) {
+        notifyGmbConfigChanged();
         request->send(200, "application/json", "{\"ok\":true}");
     } else {
         request->send(400, "application/json",
@@ -1303,6 +1351,8 @@ void WebServer::handlePostWiFi(AsyncWebServerRequest* request,
     }
 
     _config->setWiFiConfig(wifi);
+    // The hostname is the descriptor's device name.
+    notifyGmbConfigChanged();
     request->send(200, "application/json",
                   "{\"ok\":true,\"note\":\"restart to apply WiFi changes\"}");
 }
@@ -1332,6 +1382,12 @@ void WebServer::handlePostMidi(AsyncWebServerRequest* request,
     midi.rtp_port         = MIDI_RTP_PORT;
     midi.jitter_buffer_ms = doc["jitter_buffer_ms"] | MIDI_JITTER_BUFFER_MS;
     midi.serial_rx_pin    = doc["serial_rx_pin"] | MIDI_SERIAL_RX_PIN;
+    // A negative or out-of-range value disables the MIDI OUT pin.
+    {
+        int tx = doc["serial_tx_pin"] | -1;
+        midi.serial_tx_pin = (tx >= 0 && tx <= 39) ? (uint8_t)tx
+                                                   : (uint8_t)MIDI_SERIAL_TX_DISABLED;
+    }
 
     // Keep raw UDP clear of the AppleMIDI control/data port pair.
     if (midi.udp_port == midi.rtp_port || midi.udp_port == (uint16_t)(midi.rtp_port + 1)) {
@@ -1589,6 +1645,7 @@ void WebServer::handlePostRouting(AsyncWebServerRequest* request,
     }  // lock released before the dispatcher reload
 
     _dispatcher->refreshConfig();
+    notifyGmbConfigChanged();
 
     request->send(200, "application/json", "{\"ok\":true}");
 }
@@ -1618,6 +1675,9 @@ void WebServer::handlePostPowerBudget(AsyncWebServerRequest* request,
     // AUDIT FIX (UI-P1): mirror the change into the persisted config so a
     // subsequent "Save to flash" keeps it across reboots.
     if (_config) _config->setPowerBudget(_resources->getBudget());
+
+    // Concurrency and current budgets are polyphony capabilities.
+    notifyGmbConfigChanged();
 
     request->send(200, "application/json", "{\"ok\":true}");
 }
@@ -1674,6 +1734,9 @@ void WebServer::handlePostSafety(AsyncWebServerRequest* request,
         sl.servo_hold_ms    = _resources->getServoHoldTimeout();
         _config->setSafetyLimits(sl);
     }
+
+    // max_polyphony bounds polyphony, max_freq_hz bounds re-articulation.
+    notifyGmbConfigChanged();
 
     request->send(200, "application/json", "{\"ok\":true}");
 }
@@ -1826,6 +1889,7 @@ void WebServer::handlePostDefaults(AsyncWebServerRequest* request) {
     }
 
     if (_dispatcher) _dispatcher->refreshConfig();
+    notifyGmbConfigChanged();
     logger.log(LOG_WARN, CAT_SYSTEM, "Factory reset applied — restarting");
 
     _restart_at_ms = millis() + 400;  // let the response flush, then reboot
@@ -1940,6 +2004,7 @@ void WebServer::handleDeleteInstrument(AsyncWebServerRequest* request) {
 
     if (_config->removeInstrument(index)) {
         if (_dispatcher) _dispatcher->refreshConfig();
+        notifyGmbConfigChanged();
         request->send(200, "application/json", "{\"ok\":true}");
     } else {
         request->send(404, "application/json",
@@ -1992,6 +2057,7 @@ void WebServer::handleDeleteActuator(AsyncWebServerRequest* request) {
     }  // lock released here
 
     if (removed) {
+        notifyGmbConfigChanged();
         request->send(200, "application/json", "{\"ok\":true}");
     } else {
         request->send(404, "application/json",
@@ -2376,6 +2442,9 @@ void WebServer::handlePostCalibrateApply(AsyncWebServerRequest* request) {
         }
     }
 
+    // Measured acoustic latency is a declared timing capability.
+    if (applied > 0) notifyGmbConfigChanged();
+
     JsonDocument doc;
     doc["ok"]      = true;
     doc["applied"] = applied;
@@ -2654,4 +2723,115 @@ void WebServer::handlePostLogsClear(AsyncWebServerRequest* request) {
     logger.clear();
     logger.log(LOG_INFO, CAT_SYSTEM, "System log cleared");
     request->send(200, "application/json", "{\"ok\":true}");
+}
+
+// ============================================================================
+// General-Midi-Boop v2 — descriptor + diagnostics endpoints
+// ============================================================================
+
+void WebServer::handleGetGmbDescriptor(AsyncWebServerRequest* request) {
+    if (_gmb == nullptr) {
+        request->send(503, "application/json", "{\"error\":\"GMB not ready\"}");
+        return;
+    }
+    // One serializer, one cache: this is byte-for-byte the document the block
+    // 0x10 transfer serves. Copied through a transient heap buffer sized to the
+    // descriptor rather than a permanent worst-case static one.
+    uint16_t size = _gmb->descriptorBytes();
+    if (size == 0) {
+        request->send(503, "application/json",
+                      "{\"error\":\"no descriptor published\"}");
+        return;
+    }
+    char* buffer = (char*)malloc((size_t)size + 1);
+    if (buffer == nullptr) {
+        request->send(503, "application/json", "{\"error\":\"out of memory\"}");
+        return;
+    }
+    uint16_t len = _gmb->copyDescriptor(buffer, (uint16_t)(size + 1));
+    if (len == 0) {
+        free(buffer);
+        request->send(503, "application/json",
+                      "{\"error\":\"no descriptor published\"}");
+        return;
+    }
+    String body(buffer);
+    free(buffer);
+    AsyncWebServerResponse* resp =
+        request->beginResponse(200, "application/json", body);
+    // The revision doubles as an ETag (spec §2), so a controller can skip the
+    // body when nothing changed.
+    resp->addHeader("X-GMB-Revision", String((uint32_t)_gmb->revision()));
+    resp->addHeader("Cache-Control", "no-cache");
+    request->send(resp);
+}
+
+void WebServer::handleGetGmbStatus(AsyncWebServerRequest* request) {
+    if (_gmb == nullptr) {
+        request->send(503, "application/json", "{\"error\":\"GMB not ready\"}");
+        return;
+    }
+    JsonDocument doc;
+    doc["protocol"]        = "General-Midi-Boop v2";
+    doc["protocol_version"] = GMB_PROTOCOL_VERSION;
+
+    char instance[11];
+    snprintf(instance, sizeof(instance), "0x%08X", (unsigned)gmbInstanceId());
+    doc["instance_id"]     = instance;
+
+    doc["revision"]        = _gmb->revision();
+    doc["descriptor_size"] = _gmb->descriptorBytes();
+    doc["chunk_count"]     = _gmb->chunkCount();
+    doc["detail_level"]    = _gmb->detailLevel();
+    doc["degraded"]        = _gmb->degraded();
+    doc["overflow"]        = _gmb->overflowed();
+    doc["rebuilds"]        = _gmb->rebuildCount();
+    doc["revision_writes"] = _gmb->revisionWrites();
+
+    uint8_t flags = _gmb->handshakeFlags();
+    doc["http_descriptor"] = (flags & GMB_FLAG_HTTP_AVAILABLE) != 0;
+    doc["push_notify"]     = (flags & GMB_FLAG_PUSH_NOTIFY) != 0;
+
+    const GmbCapabilitySnapshot& snap = _gmb->snapshot();
+    doc["logical_instruments"] = snap.instrument_count;
+    doc["playable_notes"]      = snap.playable_note_total;
+    doc["rejected_mappings"]   = snap.rejected_mapping_total;
+
+    JsonArray insts = doc["instruments"].to<JsonArray>();
+    for (uint8_t i = 0; i < snap.instrument_count; i++) {
+        const GmbInstrumentCaps& e = snap.instruments[i];
+        JsonObject o = insts.add<JsonObject>();
+        o["channel"]     = e.channel;
+        o["configured"]  = e.configured;
+        o["name"]        = e.name;
+        o["type"]        = (e.type != nullptr) ? e.type : "";
+        o["notes"]       = e.note_count;
+        o["mode"]        = e.contiguous ? "range" : "discrete";
+        o["velocity"]    = e.velocity;
+        o["polyphony"]   = e.polyphony_max;
+        o["actuators"]   = e.distinct_actuators;
+        o["merged_from"] = e.source_count;
+    }
+
+    const GmbSysExStats& st = _gmb->stats();
+    JsonObject sx = doc["sysex"].to<JsonObject>();
+    sx["handshakes"]          = st.handshakes;
+    sx["chunk_requests"]      = st.chunk_requests;
+    sx["notifications"]       = st.notifications;
+    sx["invalid"]             = st.invalid;
+    sx["rate_limited"]        = st.rate_limited;
+    sx["transfers_started"]   = st.transfers_started;
+    sx["transfers_completed"] = st.transfers_completed;
+    sx["transfers_timed_out"] = st.transfers_timed_out;
+    sx["last_handshake_ms"]    = st.last_handshake_ms;
+    sx["last_chunk_ms"]        = st.last_chunk_ms;
+    sx["last_notification_ms"] = st.last_notification_ms;
+    if (_transport != nullptr) {
+        sx["frames_in"]  = _transport->getSysExInCount();
+        sx["frames_out"] = _transport->getSysExOutCount();
+    }
+
+    String output;
+    serializeJson(doc, output);
+    request->send(200, "application/json", output);
 }
