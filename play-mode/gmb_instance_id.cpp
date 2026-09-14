@@ -18,17 +18,20 @@ uint32_t gmbInstanceIdFromMac(const uint8_t mac[6]) {
     return h;
 }
 
-#if defined(ARDUINO) && defined(ESP32)
-#include <esp_system.h>
+#if defined(ARDUINO)
 
 uint32_t gmbInstanceId() {
     static uint32_t cached = 0;
     if (cached != 0) return cached;
 
-    uint8_t mac[6] = {0, 0, 0, 0, 0, 0};
     // Factory-burned eFuse MAC: identical across reboots, unique per chip, and
-    // unaffected by the Wi-Fi interface actually in use.
-    esp_efuse_mac_get_default(mac);
+    // unaffected by which Wi-Fi interface happens to be up. Read through the
+    // Arduino core API so no ESP-IDF header layout is assumed.
+    uint64_t efuse = ESP.getEfuseMac();
+    uint8_t mac[6];
+    for (uint8_t i = 0; i < 6; i++) {
+        mac[i] = (uint8_t)((efuse >> (8 * i)) & 0xFF);
+    }
     cached = gmbInstanceIdFromMac(mac);
     return cached;
 }
