@@ -5,6 +5,7 @@
 ```cpp
 struct InstrumentConfig {
     char name[32];               // Instrument name
+    uint8_t gm_program;          // Musical profile (GM program 0-127, 0xFF = unset)
     uint8_t midi_channel;        // MIDI channel (0-15)
     uint8_t bus_id;              // Dedicated I²C bus
     uint8_t actuator_ids[64];    // Associated actuator IDs
@@ -18,6 +19,10 @@ struct InstrumentConfig {
 
 * Up to **8 simultaneous instruments** on the same ESP32
 * Each instrument has its own MIDI channel, I²C bus, CCs and calibration profile
+* `gm_program` is the **only** musical-identity field. It is what the
+  General-Midi-Boop descriptor derives `type` / `subtype` from, so there is no
+  second vocabulary to maintain and nothing is inferred from actuator topology
+  (see [General-Midi-Boop v2](gmb-v2.md))
 * The global scheduler manages all instruments in parallel
 
 ## ActuatorConfig

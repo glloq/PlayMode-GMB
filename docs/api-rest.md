@@ -20,6 +20,8 @@
 | `GET /api/test/status` | Current test state (sweep/burst/stress) |
 | `GET /api/test/log` | Test event log |
 | `GET /api/logs` | System log (last 128 entries) |
+| `GET /gmb/descriptor.json` | General-Midi-Boop v2 capability descriptor (read-only, unauthenticated — the same document the SysEx transfer serves; carries `X-GMB-Revision`) |
+| `GET /api/gmb/status` | General-Midi-Boop diagnostics: instance id, revision, descriptor size, chunk count, announced instruments, SysEx traffic counters |
 
 ## Write Configuration (POST JSON)
 

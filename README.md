@@ -8,6 +8,9 @@
 ## Features
 
 * **3 simultaneous MIDI inputs**: DIN/TRS cable (Serial), WiFi UDP, WiFi RTP-MIDI (Apple MIDI)
+* **Recognised automatically by General-Midi-Boop** (protocol v2): the controller discovers the
+  channels, playable notes, velocity response, polyphony and timing straight from your
+  configuration — nothing to enter twice
 * **Up to 128 actuators** (servos + solenoids) on 2 independent I²C buses (64 per bus)
 * **8 simultaneous instruments**, each on its own MIDI channel
 * **6 behaviors**: 4 servo (strike, alternate, strum, key) + 2 solenoid (strike, hit-and-hold)
@@ -33,6 +36,7 @@
               │  GPIO 26 ── OE       │  Hardware kill switch bus 1
               │                      │
    MIDI In    │  GPIO  4 ── RX       │  Serial MIDI 31250 baud
+   MIDI Out   │  (optional, any GPIO)│  Needed for DIN auto-recognition
               │                      │
    I²S Mic    │  GPIO 15 ── WS       │  INMP441 (optional)
    (optional) │  GPIO 14 ── SCK      │  Acoustic calibration
@@ -53,6 +57,7 @@
 | I²C1 SCL | 17 | Output | Bus 1 — 400 kHz |
 | I²C1 OE | 26 | Output | Output Enable bus 1 (LOW = active, HIGH = disabled) |
 | MIDI RX | 4 | Input | Serial2 RX — 31250 baud, optocoupler recommended |
+| MIDI TX | — | Output | Optional Serial2 TX (set on the MIDI page). Without a MIDI OUT the cable cannot answer a General-Midi-Boop handshake |
 | I²S WS | 15 | Output | Word Select INMP441 mic (L/R → GND = left) |
 | I²S SCK | 14 | Output | Bit Clock INMP441 mic |
 | I²S SD | 32 | Input | Data INMP441 mic |
@@ -72,6 +77,24 @@ Each I²C bus supports up to **4 PCA9685 modules** (addresses 0x40 to 0x43), pro
 **Why max 4 PCA per bus?** The PCA9685 communicates via I²C at 400 kHz. Each PWM channel update requires an I²C transaction (~30 bytes). With 4 PCA boards (64 channels) on a single bus, a full update of all channels takes about **5 ms** — which remains compatible with the 1 ms scheduler tick for real-world cases (partial updates). Beyond 4 PCA, cumulative I²C latency would exceed the scheduler's real-time constraints and cause audible triggering delays. The limit of 4 is a trade-off between actuator count and timing precision.
 
 **OE (Output Enable)** — Each bus has an OE pin that instantly disables all PWM outputs on the bus (hardware kill switch). In case of overcurrent or emergency, the Safety Manager can disable an entire bus with a single GPIO operation.
+
+### Automatic recognition (General-Midi-Boop v2)
+
+PlayMode answers General-Midi-Boop's discovery handshake and publishes a capability descriptor
+built from the **active** configuration — there is no second profile to keep in sync. The
+controller learns the logical instruments and their MIDI channels, the notes that are really
+playable, whether velocity changes anything physically, how many notes can sound at once, and the
+timing that is actually known.
+
+Servo versus solenoid is an implementation detail and never splits an instrument: a mechanical
+piano with solenoid keys and a servo pedal is announced as *one* instrument.
+
+Pick the musical type (xylophone, bells, piano, kalimba…) in the instrument dialog and everything
+else is derived. The **MIDI** page shows what is being announced. Recognition needs a return path
+— USB/BLE/RTP, WiFi, or a wired MIDI OUT; a DIN IN-only wiring still has to be selected by hand on
+the controller.
+
+See [General-Midi-Boop v2](docs/gmb-v2.md).
 
 ### Wiring page (generated diagram)
 
@@ -137,3 +160,4 @@ pio device monitor
 | [Web Interface](docs/web-interface.md) | UI navigation, pages, features, design system |
 | [Calibration & Tests](docs/calibration-tests.md) | I²S acoustic calibration, sweep/burst/stress tests, workflow |
 | [UI Plan](docs/ui-plan.md) | UI refactoring history (3 tabs + Settings) |
+| [General-Midi-Boop v2](docs/gmb-v2.md) | Automatic recognition: handshake, descriptor, how each capability is derived |
